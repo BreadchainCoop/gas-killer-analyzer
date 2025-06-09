@@ -1,14 +1,396 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+mod constants;
+mod sol_types;
+
+use alloy::{
+    primitives::{Address, Bytes, FixedBytes},
+    providers::{Provider, ProviderBuilder, ext::DebugApi},
+    rpc::types::{
+        eth::TransactionRequest,
+        trace::geth::{
+            DefaultFrame, GethDebugTracingOptions, GethDefaultTracingOptions, GethTrace, StructLog,
+        },
+    },
+    sol_types::SolValue,
+};
+use anyhow::{Result, bail};
+use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
+use url::Url;
+
+fn copy_memory(memory: &[u8], offset: usize, length: usize) -> Vec<u8> {
+    memory[offset..offset + length].to_vec()
+}
+
+fn parse_trace_memory(memory: Vec<String>) -> Vec<u8> {
+    memory
+        .join("")
+        .chars()
+        .collect::<Vec<char>>()
+        .chunks(2)
+        .map(|c| c.iter().collect::<String>())
+        .map(|s| u8::from_str_radix(&s, 16).expect("invalid hex"))
+        .collect::<Vec<u8>>()
+}
+
+fn append_to_state_updates(
+    state_updates: &mut Vec<StateUpdate>,
+    struct_log: StructLog,
+) -> Result<()> {
+    let mut stack = struct_log.stack.expect("stack is empty");
+    stack.reverse();
+    let memory = match struct_log.memory {
+        Some(memory) => parse_trace_memory(memory),
+        None => match struct_log.op.as_str() {
+            "CALL" if struct_log.depth == 1 => bail!("There is no memory for CALL in depth 1"),
+            _ => return Ok(()),
+        },
+    };
+    // we don't care about state changes in inner calls
+    if struct_log.depth != 1 {
+        return Ok(());
+    }
+    match struct_log.op.as_str() {
+        "DELEGATECALL" | "CALLCODE" | "CREATE" | "CREATE2" | "SELFDESTRUCT" => {
+            bail!("Opcode not allowed: {:?}", struct_log.op)
+        }
+        "SSTORE" => state_updates.push(StateUpdate::Store(IStateUpdateTypes::Store {
+            slot: stack[0].into(),
+            value: stack[1].into(),
+        })),
+        "CALL" => {
+            let args_offset: usize = stack[3].try_into().expect("invalid args offset");
+            let args_length: usize = stack[4].try_into().expect("invalid args length");
+            let args = copy_memory(&memory, args_offset, args_length);
+            state_updates.push(StateUpdate::Call(IStateUpdateTypes::Call {
+                target: Address::from_word(stack[1].into()),
+                value: stack[2].into(),
+                callargs: args.into(),
+            }));
+        }
+        "LOG0" => {
+            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
+            let data_length: usize = stack[1].try_into().expect("invalid data length");
+            let data = copy_memory(&memory, data_offset, data_length);
+            state_updates.push(StateUpdate::Log0(IStateUpdateTypes::Log0 {
+                data: data.into(),
+            }));
+        }
+        "LOG1" => {
+            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
+            let data_length: usize = stack[1].try_into().expect("invalid data length");
+            let data = copy_memory(&memory, data_offset, data_length);
+            state_updates.push(StateUpdate::Log1(IStateUpdateTypes::Log1 {
+                data: data.into(),
+                topic1: stack[2].into(),
+            }));
+        }
+        "LOG2" => {
+            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
+            let data_length: usize = stack[1].try_into().expect("invalid data length");
+            let data = copy_memory(&memory, data_offset, data_length);
+            state_updates.push(StateUpdate::Log2(IStateUpdateTypes::Log2 {
+                data: data.into(),
+                topic1: stack[2].into(),
+                topic2: stack[3].into(),
+            }));
+        }
+        "LOG3" => {
+            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
+            let data_length: usize = stack[1].try_into().expect("invalid data length");
+            let data = copy_memory(&memory, data_offset, data_length);
+            state_updates.push(StateUpdate::Log3(IStateUpdateTypes::Log3 {
+                data: data.into(),
+                topic1: stack[2].into(),
+                topic2: stack[3].into(),
+                topic3: stack[4].into(),
+            }));
+        }
+        "LOG4" => {
+            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
+            let data_length: usize = stack[1].try_into().expect("invalid data length");
+            let data = copy_memory(&memory, data_offset, data_length);
+            state_updates.push(StateUpdate::Log4(IStateUpdateTypes::Log4 {
+                data: data.into(),
+                topic1: stack[2].into(),
+                topic2: stack[3].into(),
+                topic3: stack[4].into(),
+                topic4: stack[5].into(),
+            }));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+async fn compute_state_updates(trace: DefaultFrame) -> Result<Vec<StateUpdate>> {
+    let mut state_updates: Vec<StateUpdate> = Vec::new();
+    for struct_log in trace.struct_logs {
+        append_to_state_updates(&mut state_updates, struct_log)?;
+    }
+    Ok(state_updates)
+}
+
+async fn get_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
+    let options = GethDebugTracingOptions {
+        config: GethDefaultTracingOptions {
+            enable_memory: Some(true),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let GethTrace::Default(trace) = provider.debug_trace_transaction(tx_hash, options).await?
+    else {
+        return Err(anyhow::anyhow!("Expected default trace"));
+    };
+    Ok(trace)
+}
+
+pub async fn get_trace_from_call(rpc_url: Url, tx_request: TransactionRequest) -> Result<DefaultFrame> {
+    let provider = ProviderBuilder::new().connect_anvil_with_wallet_and_config(|config| {
+        config
+            .fork(rpc_url)
+            .arg("--steps-tracing")
+            .arg("--auto-impersonate")
+    })?;
+    let tx_hash = provider.send_transaction(tx_request).await?.watch().await?;
+    get_trace(&provider, tx_hash).await
+}
+
+fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
+    let state_update_types: Vec<StateUpdateType> = state_updates
+        .iter()
+        .map(|state_update| match state_update {
+            StateUpdate::Store(_) => StateUpdateType::STORE,
+            StateUpdate::Call(_) => StateUpdateType::CALL,
+            StateUpdate::Log0(_) => StateUpdateType::LOG0,
+            StateUpdate::Log1(_) => StateUpdateType::LOG1,
+            StateUpdate::Log2(_) => StateUpdateType::LOG2,
+            StateUpdate::Log3(_) => StateUpdateType::LOG3,
+            StateUpdate::Log4(_) => StateUpdateType::LOG4,
+        })
+        .collect::<Vec<_>>();
+    // This is ugly but I can't bother doing it with traits
+    let datas: Vec<Bytes> = state_updates
+        .iter()
+        .map(|state_update| {
+            Bytes::copy_from_slice(&match state_update {
+                StateUpdate::Store(x) => x.abi_encode(),
+                StateUpdate::Call(x) => x.abi_encode(),
+                StateUpdate::Log0(x) => x.abi_encode(),
+                StateUpdate::Log1(x) => x.abi_encode(),
+                StateUpdate::Log2(x) => x.abi_encode(),
+                StateUpdate::Log3(x) => x.abi_encode(),
+                StateUpdate::Log4(x) => x.abi_encode(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let state_updates = StateUpdates {
+        types: state_update_types
+            .iter()
+            .map(|x| *x as u8)
+            .collect::<Vec<_>>(),
+        data: datas,
+    };
+    let encoded = StateUpdates::abi_encode(&state_updates);
+    Bytes::copy_from_slice(&encoded)
+}
+
+async fn call_to_encoded_state_updates(url: Url, tx_request: TransactionRequest) -> Result<Bytes> {
+    let trace = get_trace_from_call(url, tx_request).await?;
+    let state_updates = compute_state_updates(trace).await?;
+    Ok(encode_state_updates_to_abi(&state_updates))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::{
+        hex,
+        primitives::{U256, address, b256, bytes},
+        signers::local::LocalSigner,
+    };
+    use constants::*;
+    use sol_types::SimpleStorage;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    #[tokio::test]
+    async fn test_compute_state_updates_set() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
+            .parse()?;
+        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
+        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
+        let bytes = hex::decode(private_key).expect("Invalid private key hex");
+        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
+        let provider = ProviderBuilder::new().wallet(signer).on_http(rpc_url);
+
+        let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
+        let trace = get_trace(&provider, tx_hash).await?;
+        let state_updates = compute_state_updates(trace).await?;
+
+        assert_eq!(state_updates.len(), 2);
+        assert!(matches!(state_updates[0], StateUpdate::Store(_)));
+        let StateUpdate::Store(store) = &state_updates[0] else {
+            bail!("Expected Store");
+        };
+
+        assert_eq!(
+            store.slot,
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000000")
+        );
+        assert_eq!(
+            store.value,
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000001")
+        );
+
+        assert!(matches!(state_updates[1], StateUpdate::Log1(_)));
+        let StateUpdate::Log1(log) = &state_updates[1] else {
+            bail!("Expected Log1");
+        };
+        assert_eq!(
+            log.data,
+            bytes!("0x0000000000000000000000000000000000000000000000000000000000000001")
+        );
+        assert_eq!(
+            log.topic1,
+            b256!("0x9455957c3b77d1d4ed071e2b469dd77e37fc5dfd3b4d44dc8a997cc97c7b3d49")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_compute_state_updates_deposit() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
+            .parse()?;
+        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
+        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
+        let bytes = hex::decode(private_key).expect("Invalid private key hex");
+        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
+        let provider = ProviderBuilder::new().wallet(signer).on_http(rpc_url);
+
+        let tx_hash = SIMPLE_STORAGE_DEPOSIT_TX_HASH;
+        let trace = get_trace(&provider, tx_hash).await?;
+        let state_updates = compute_state_updates(trace).await?;
+
+        assert_eq!(state_updates.len(), 2);
+        assert!(matches!(state_updates[0], StateUpdate::Store(_)));
+        let StateUpdate::Store(store) = &state_updates[0] else {
+            bail!("Expected Store");
+        };
+
+        assert_eq!(
+            store.slot,
+            b256!("0x440be2d9467c2219d5dbcccf352e669f171177c1a3ff408399184565c5a56cca")
+        );
+        assert_eq!(
+            store.value,
+            b256!("0x00000000000000000000000000000000000000000000000000005af3107a4000")
+        );
+
+        assert!(matches!(state_updates[1], StateUpdate::Log2(_)));
+        let StateUpdate::Log2(log) = &state_updates[1] else {
+            bail!("Expected Log2");
+        };
+        assert_eq!(
+            log.data,
+            bytes!("0x00000000000000000000000000000000000000000000000000005af3107a4000")
+        );
+        assert_eq!(
+            log.topic1,
+            b256!("0x8ad64a0ac7700dd8425ab0499f107cb6e2cd1581d803c5b8c1c79dcb8190b1af")
+        );
+        assert_eq!(
+            log.topic2,
+            b256!("0x000000000000000000000000cb7c611933f1697f6e56929f4eee39af8f5b313e")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_compute_state_updates_call_external() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
+            .parse()?;
+        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
+        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
+        let bytes = hex::decode(private_key).expect("Invalid private key hex");
+        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
+        let provider = ProviderBuilder::new().wallet(signer).on_http(rpc_url);
+
+        let tx_hash = SIMPLE_STORAGE_CALL_EXTERNAL_TX_HASH;
+        let trace = get_trace(&provider, tx_hash).await?;
+        let state_updates = compute_state_updates(trace).await?;
+
+        assert_eq!(state_updates.len(), 1);
+        assert!(matches!(state_updates[0], StateUpdate::Call(_)));
+        let StateUpdate::Call(call) = &state_updates[0] else {
+            bail!("Expected Call");
+        };
+
+        assert_eq!(
+            call.target,
+            address!("0x523a103bb468a26295d7dbcb37ad919b0afbf294")
+        );
+        assert_eq!(call.value, U256::from(0));
+        assert_eq!(call.callargs, bytes!("0x3a32b549"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_compute_state_update_simulate_call() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
+            .parse()?;
+        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
+        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
+        let bytes = hex::decode(private_key).expect("Invalid private key hex");
+        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
+        let provider = ProviderBuilder::new()
+            .wallet(signer)
+            .connect_http(rpc_url.clone());
+
+        let simple_storage = SimpleStorage::deploy(&provider).await?;
+        let tx_request = simple_storage.set(U256::from(1)).into_transaction_request();
+
+        let trace = get_trace_from_call(rpc_url, tx_request).await?;
+        let state_updates = compute_state_updates(trace).await?;
+
+        assert_eq!(state_updates.len(), 2);
+        assert!(matches!(state_updates[0], StateUpdate::Store(_)));
+        let StateUpdate::Store(store) = &state_updates[0] else {
+            bail!("Expected Store");
+        };
+
+        assert_eq!(
+            store.slot,
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000000")
+        );
+        assert_eq!(
+            store.value,
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000001")
+        );
+
+        assert!(matches!(state_updates[1], StateUpdate::Log1(_)));
+        let StateUpdate::Log1(log) = &state_updates[1] else {
+            bail!("Expected Log1");
+        };
+        assert_eq!(
+            log.data,
+            bytes!("0x0000000000000000000000000000000000000000000000000000000000000001")
+        );
+        assert_eq!(
+            log.topic1,
+            b256!("0x9455957c3b77d1d4ed071e2b469dd77e37fc5dfd3b4d44dc8a997cc97c7b3d49")
+        );
+        Ok(())
     }
 }
