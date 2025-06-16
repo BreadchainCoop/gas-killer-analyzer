@@ -1,5 +1,6 @@
 mod constants;
 mod sol_types;
+mod gk;
 
 use alloy::{
     primitives::{Address, Bytes, FixedBytes},
@@ -12,6 +13,7 @@ use alloy::{
     },
     sol_types::SolValue,
 };
+use gk::{GasKillerDefault, WarmSlotsRule};
 use anyhow::{Result, bail};
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
 use url::Url;
@@ -155,7 +157,7 @@ pub async fn get_trace_from_call(rpc_url: Url, tx_request: TransactionRequest) -
     get_trace(&provider, tx_hash).await
 }
 
-fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
+fn encode_state_updates_to_sol(state_updates: &[StateUpdate]) -> (Vec<StateUpdateType>, Vec<Bytes>) {
     let state_update_types: Vec<StateUpdateType> = state_updates
         .iter()
         .map(|state_update| match state_update {
@@ -183,7 +185,11 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
             })
         })
         .collect::<Vec<_>>();
+    (state_update_types, datas)
+}
 
+fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
+    let (state_update_types, datas) = encode_state_updates_to_sol(state_updates);
     let state_updates = StateUpdates {
         types: state_update_types
             .iter()
@@ -195,10 +201,17 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
     Bytes::copy_from_slice(&encoded)
 }
 
-async fn call_to_encoded_state_updates(url: Url, tx_request: TransactionRequest) -> Result<Bytes> {
+pub async fn call_to_encoded_state_updates(url: Url, tx_request: TransactionRequest) -> Result<Bytes> {
     let trace = get_trace_from_call(url, tx_request).await?;
     let state_updates = compute_state_updates(trace).await?;
     Ok(encode_state_updates_to_abi(&state_updates))
+}
+
+pub async fn call_to_encoded_state_updates_with_gas_estimate<P>(url: Url, tx_request: TransactionRequest, gk: GasKillerDefault) -> Result<(Bytes, u64)> {
+    let trace = get_trace_from_call(url, tx_request).await?;
+    let state_updates = compute_state_updates(trace).await?;
+    let gas_estimate = gk.estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore).await?; 
+    Ok((encode_state_updates_to_abi(&state_updates), gas_estimate))
 }
 
 #[cfg(test)]
@@ -223,11 +236,15 @@ mod tests {
         let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
         let bytes = hex::decode(private_key).expect("Invalid private key hex");
         let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-        let provider = ProviderBuilder::new().wallet(signer).on_http(rpc_url);
+        let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
         let trace = get_trace(&provider, tx_hash).await?;
         let state_updates = compute_state_updates(trace).await?;
+
+        let gk = GasKillerDefault::new().await?;
+        let gas_estimate = gk.estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore).await?;
+        assert_eq!(gas_estimate, 32958);
 
         assert_eq!(state_updates.len(), 2);
         assert!(matches!(state_updates[0], StateUpdate::Store(_)));
@@ -270,7 +287,7 @@ mod tests {
         let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
         let bytes = hex::decode(private_key).expect("Invalid private key hex");
         let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-        let provider = ProviderBuilder::new().wallet(signer).on_http(rpc_url);
+        let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_DEPOSIT_TX_HASH;
         let trace = get_trace(&provider, tx_hash).await?;
@@ -321,7 +338,7 @@ mod tests {
         let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
         let bytes = hex::decode(private_key).expect("Invalid private key hex");
         let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-        let provider = ProviderBuilder::new().wallet(signer).on_http(rpc_url);
+        let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_CALL_EXTERNAL_TX_HASH;
         let trace = get_trace(&provider, tx_hash).await?;

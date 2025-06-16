@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-alloy = { version = "1.0.3", features = ["rpc", "rpc-types", "node-bindings"] }
+alloy = { version = "1.0.3", features = ["sol-types", "contract", "rpc", "rpc-types", "node-bindings"] }
 alloy-rpc-types = { version = "1.0", features = ["trace" ] }
 alloy-provider = { version = "1.0", features = ["debug-api"] }
 anyhow = "1.0.98"
@@ -12,3 +12,6 @@ tokio = { version = "1.45.1", features = ["rt-multi-thread"] }
 url = "2.5.4"
 dotenv = "0.15.0"
 alloy-sol-types = "1.0"
+
+[build-dependencies]
+serde_json = "1.0"
