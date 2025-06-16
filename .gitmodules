@@ -1,0 +1,6 @@
+[submodule "gk-alloy-adapter/lib/forge-std"]
+	path = gk-alloy-adapter/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "gk-alloy-adapter/lib/gas-killer-avs-sol"]
+	path = gk-alloy-adapter/lib/gas-killer-avs-sol
+	url = https://github.com/BreadchainCoop/gas-killer-avs-sol
