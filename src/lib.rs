@@ -1,6 +1,7 @@
+#[allow(dead_code)]
 mod constants;
+pub mod gk;
 mod sol_types;
-mod gk;
 
 use alloy::{
     primitives::{Address, Bytes, FixedBytes},
@@ -9,12 +10,13 @@ use alloy::{
         eth::TransactionRequest,
         trace::geth::{
             DefaultFrame, GethDebugTracingOptions, GethDefaultTracingOptions, GethTrace, StructLog,
+            TraceResult,
         },
     },
     sol_types::SolValue,
 };
-use gk::{GasKillerDefault, WarmSlotsRule};
 use anyhow::{Result, bail};
+use gk::{GasKillerDefault, WarmSlotsRule};
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
 use url::Url;
 
@@ -64,7 +66,7 @@ fn append_to_state_updates(
             let args = copy_memory(&memory, args_offset, args_length);
             state_updates.push(StateUpdate::Call(IStateUpdateTypes::Call {
                 target: Address::from_word(stack[1].into()),
-                value: stack[2].into(),
+                value: stack[2],
                 callargs: args.into(),
             }));
         }
@@ -131,7 +133,17 @@ async fn compute_state_updates(trace: DefaultFrame) -> Result<Vec<StateUpdate>> 
     Ok(state_updates)
 }
 
-async fn get_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
+async fn compute_state_updates_block(trace: Vec<DefaultFrame>) -> Result<Vec<StateUpdate>> {
+    let mut state_updates: Vec<StateUpdate> = Vec::new();
+    for frame in trace {
+        if let Ok(mut new_update) = compute_state_updates(frame).await {
+            state_updates.append(&mut new_update);
+        }
+    }
+    Ok(state_updates)
+}
+
+async fn get_tx_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
     let options = GethDebugTracingOptions {
         config: GethDefaultTracingOptions {
             enable_memory: Some(true),
@@ -139,6 +151,7 @@ async fn get_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result
         },
         ..Default::default()
     };
+
     let GethTrace::Default(trace) = provider.debug_trace_transaction(tx_hash, options).await?
     else {
         return Err(anyhow::anyhow!("Expected default trace"));
@@ -146,7 +159,37 @@ async fn get_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result
     Ok(trace)
 }
 
-pub async fn get_trace_from_call(rpc_url: Url, tx_request: TransactionRequest) -> Result<DefaultFrame> {
+async fn get_block_trace<P: Provider>(provider: &P, block: &[u8]) -> Result<Vec<DefaultFrame>> {
+    let options = GethDebugTracingOptions {
+        config: GethDefaultTracingOptions {
+            enable_memory: Some(true),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let result = provider.debug_trace_block(block, options).await;
+
+    if let Ok(vector) = result {
+        Ok(vector
+            .into_iter()
+            .filter_map(|y| {
+                if let Some(GethTrace::Default(frame)) = TraceResult::success(&y).cloned() {
+                    Some(frame)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<DefaultFrame>>())
+    } else {
+        Err(anyhow::anyhow!("Block trace retrieval failed"))
+    }
+}
+
+pub async fn get_trace_from_call(
+    rpc_url: Url,
+    tx_request: TransactionRequest,
+) -> Result<DefaultFrame> {
     let provider = ProviderBuilder::new().connect_anvil_with_wallet_and_config(|config| {
         config
             .fork(rpc_url)
@@ -154,10 +197,12 @@ pub async fn get_trace_from_call(rpc_url: Url, tx_request: TransactionRequest) -
             .arg("--auto-impersonate")
     })?;
     let tx_hash = provider.send_transaction(tx_request).await?.watch().await?;
-    get_trace(&provider, tx_hash).await
+    get_tx_trace(&provider, tx_hash).await
 }
 
-fn encode_state_updates_to_sol(state_updates: &[StateUpdate]) -> (Vec<StateUpdateType>, Vec<Bytes>) {
+fn encode_state_updates_to_sol(
+    state_updates: &[StateUpdate],
+) -> (Vec<StateUpdateType>, Vec<Bytes>) {
     let state_update_types: Vec<StateUpdateType> = state_updates
         .iter()
         .map(|state_update| match state_update {
@@ -201,16 +246,59 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
     Bytes::copy_from_slice(&encoded)
 }
 
-pub async fn call_to_encoded_state_updates(url: Url, tx_request: TransactionRequest) -> Result<Bytes> {
+pub async fn fetch_encoded_state_updates(
+    provider: impl Provider,
+    tx_hash: FixedBytes<32>,
+) -> Result<Bytes> {
+    let trace = get_tx_trace(&provider, tx_hash).await?;
+    let state_updates = compute_state_updates(trace).await?;
+    Ok(encode_state_updates_to_abi(&state_updates))
+}
+pub async fn call_to_encoded_state_updates(
+    url: Url,
+    tx_request: TransactionRequest,
+) -> Result<Bytes> {
     let trace = get_trace_from_call(url, tx_request).await?;
     let state_updates = compute_state_updates(trace).await?;
     Ok(encode_state_updates_to_abi(&state_updates))
 }
 
-pub async fn call_to_encoded_state_updates_with_gas_estimate<P>(url: Url, tx_request: TransactionRequest, gk: GasKillerDefault) -> Result<(Bytes, u64)> {
+pub async fn fetch_encoded_state_updates_with_gas_estimate(
+    provider: impl Provider,
+    tx_hash: FixedBytes<32>,
+    gk: GasKillerDefault,
+) -> Result<(Bytes, u64)> {
+    let trace = get_tx_trace(&provider, tx_hash).await?;
+    let state_updates = compute_state_updates(trace).await?;
+    let gas_estimate = gk
+        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+        .await?;
+    Ok((encode_state_updates_to_abi(&state_updates), gas_estimate))
+}
+
+pub async fn fetch_encoded_state_updates_with_gas_estimate_block(
+    provider: impl Provider,
+    block_number: &[u8],
+    gk: GasKillerDefault,
+) -> Result<(Bytes, u64)> {
+    let trace = get_block_trace(&provider, block_number).await?;
+    let state_updates = compute_state_updates_block(trace).await?;
+    let gas_estimate = gk
+        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+        .await?;
+    Ok((encode_state_updates_to_abi(&state_updates), gas_estimate))
+}
+
+pub async fn call_to_encoded_state_updates_with_gas_estimate(
+    url: Url,
+    tx_request: TransactionRequest,
+    gk: GasKillerDefault,
+) -> Result<(Bytes, u64)> {
     let trace = get_trace_from_call(url, tx_request).await?;
     let state_updates = compute_state_updates(trace).await?;
-    let gas_estimate = gk.estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore).await?; 
+    let gas_estimate = gk
+        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+        .await?;
     Ok((encode_state_updates_to_abi(&state_updates), gas_estimate))
 }
 
@@ -239,11 +327,13 @@ mod tests {
         let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
-        let trace = get_trace(&provider, tx_hash).await?;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
         let state_updates = compute_state_updates(trace).await?;
 
         let gk = GasKillerDefault::new().await?;
-        let gas_estimate = gk.estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore).await?;
+        let gas_estimate = gk
+            .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+            .await?;
         assert_eq!(gas_estimate, 32958);
 
         assert_eq!(state_updates.len(), 2);
@@ -290,7 +380,7 @@ mod tests {
         let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_DEPOSIT_TX_HASH;
-        let trace = get_trace(&provider, tx_hash).await?;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
         let state_updates = compute_state_updates(trace).await?;
 
         assert_eq!(state_updates.len(), 2);
@@ -341,7 +431,7 @@ mod tests {
         let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_CALL_EXTERNAL_TX_HASH;
-        let trace = get_trace(&provider, tx_hash).await?;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
         let state_updates = compute_state_updates(trace).await?;
 
         assert_eq!(state_updates.len(), 1);
