@@ -1,10 +1,10 @@
-use alloy::{hex, primitives::FixedBytes, providers::ProviderBuilder, signers::local::LocalSigner};
+use alloy::{hex, providers::ProviderBuilder, signers::local::LocalSigner};
+use alloy_eips::{BlockId, RpcBlockHash};
 use alloy_rpc_types::TransactionRequest;
 use clap::Parser;
 use clap_derive::{Parser, Subcommand};
 use gas_analyzer_rs::{
-    call_to_encoded_state_updates_with_gas_estimate, fetch_encoded_state_updates_with_gas_estimate,
-    fetch_encoded_state_updates_with_gas_estimate_block, gk::GasKillerDefault,
+    call_to_encoded_state_updates_with_gas_estimate, gas_estimate_block, gas_estimate_tx, gk::GasKillerDefault
 };
 use std::{fs::File, io::Read};
 use url::Url;
@@ -19,11 +19,11 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     Block {
-        #[arg(short = 'n', long, help = "block number")]
-        number: u64,
+        #[arg(long, help = "block number")]
+        hash: String,
     },
     Transaction {
-        #[arg(long = "hash", help = "transaction hash")]
+        #[arg(long, help = "transaction hash")]
         hash: String,
     },
     Request {
@@ -48,7 +48,9 @@ async fn main() {
         .await
         .expect("unable to initialize GasKiller");
     match &cli.command {
-        Commands::Block { number } => {
+        Commands::Block { hash } => {
+            let id = hex::const_decode_to_array(hash.as_bytes())
+                .expect("failed to decode transaction hash");
             let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
             let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
             let bytes = hex::decode(private_key).expect("Invalid private key hex");
@@ -56,16 +58,17 @@ async fn main() {
             let provider = ProviderBuilder::new()
                 .wallet(signer)
                 .connect_http(rpc_url.clone());
-            let result = fetch_encoded_state_updates_with_gas_estimate_block(
+            let estimate = gas_estimate_block(
                 provider,
-                number.to_be_bytes().as_ref(),
+                BlockId::Hash(RpcBlockHash {
+                    block_hash: id.into(),
+                    require_canonical: None,
+                }), // TODO: allow pattern matching over variants of BlockID
                 gk,
             )
             .await;
-            if let Ok((_, estimate)) = result {
-                println!("gas killer estimate: {}", estimate);
-            } else {
-                println!("estimation failed");
+            if let Err(e) = estimate {
+                println!("Error! {}", e)
             }
         }
         Commands::Transaction { hash } => {
@@ -78,16 +81,15 @@ async fn main() {
                 .connect_http(rpc_url.clone());
             let bytes: [u8; 32] = hex::const_decode_to_array(hash.as_bytes())
                 .expect("failed to decode transaction hash");
-            let result = fetch_encoded_state_updates_with_gas_estimate(
+           
+            let estimate = gas_estimate_tx  (
                 provider,
-                FixedBytes::from(bytes),
+                bytes.into(),
                 gk,
             )
             .await;
-            if let Ok((_, estimate)) = result {
-                println!("gas killer estimate: {}", estimate);
-            } else {
-                println!("estimation failed");
+            if let Err(e) = estimate {
+                println!("Error! {}", e)
             }
         }
         Commands::Request { file } => {

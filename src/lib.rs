@@ -3,18 +3,21 @@ mod constants;
 pub mod gk;
 mod sol_types;
 
+use std::str::FromStr;
+
 use alloy::{
     primitives::{Address, Bytes, FixedBytes},
     providers::{Provider, ProviderBuilder, ext::DebugApi},
     rpc::types::{
+        TransactionReceipt,
         eth::TransactionRequest,
         trace::geth::{
             DefaultFrame, GethDebugTracingOptions, GethDefaultTracingOptions, GethTrace, StructLog,
-            TraceResult,
         },
     },
     sol_types::SolValue,
 };
+use alloy_eips::eip1898::BlockId;
 use anyhow::{Result, bail};
 use gk::{GasKillerDefault, WarmSlotsRule};
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
@@ -34,6 +37,7 @@ fn parse_trace_memory(memory: Vec<String>) -> Vec<u8> {
         .map(|s| u8::from_str_radix(&s, 16).expect("invalid hex"))
         .collect::<Vec<u8>>()
 }
+
 
 fn append_to_state_updates(
     state_updates: &mut Vec<StateUpdate>,
@@ -133,11 +137,11 @@ async fn compute_state_updates(trace: DefaultFrame) -> Result<Vec<StateUpdate>> 
     Ok(state_updates)
 }
 
-async fn compute_state_updates_block(trace: Vec<DefaultFrame>) -> Result<Vec<StateUpdate>> {
-    let mut state_updates: Vec<StateUpdate> = Vec::new();
+async fn compute_state_updates_block(trace: Vec<DefaultFrame>) -> Result<Vec<Vec<StateUpdate>>> {
+    let mut state_updates: Vec<Vec<StateUpdate>> = Vec::new();
     for frame in trace {
-        if let Ok(mut new_update) = compute_state_updates(frame).await {
-            state_updates.append(&mut new_update);
+        if let Ok(new_update) = compute_state_updates(frame).await {
+            state_updates.push(new_update);
         }
     }
     Ok(state_updates)
@@ -159,31 +163,23 @@ async fn get_tx_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Res
     Ok(trace)
 }
 
-async fn get_block_trace<P: Provider>(provider: &P, block: &[u8]) -> Result<Vec<DefaultFrame>> {
-    let options = GethDebugTracingOptions {
-        config: GethDefaultTracingOptions {
-            enable_memory: Some(true),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+async fn get_block_trace<P: Provider>(
+    provider: &P,
+    block_id: BlockId,
+) -> Result<Vec<DefaultFrame>> {
+    let block = provider
+        .get_block(block_id)
+        .await?
+        .expect("block retrieval failed");
 
-    let result = provider.debug_trace_block(block, options).await;
+    let mut traces = Vec::new();
 
-    if let Ok(vector) = result {
-        Ok(vector
-            .into_iter()
-            .filter_map(|y| {
-                if let Some(GethTrace::Default(frame)) = TraceResult::success(&y).cloned() {
-                    Some(frame)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<DefaultFrame>>())
-    } else {
-        Err(anyhow::anyhow!("Block trace retrieval failed"))
+    for tx_hash in block.transactions.hashes() {
+        println!("getting trace for transaction {:x}", tx_hash);
+        let trace = get_tx_trace(provider, tx_hash).await?;
+        traces.push(trace)
     }
+    Ok(traces)
 }
 
 pub async fn get_trace_from_call(
@@ -274,20 +270,121 @@ pub async fn fetch_encoded_state_updates_with_gas_estimate(
         .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
         .await?;
     Ok((encode_state_updates_to_abi(&state_updates), gas_estimate))
+        
 }
 
+
+pub async fn invokes_smart_contract(provider: impl Provider, receipt: TransactionReceipt) -> Result<bool> {
+    let to_address = receipt.to;
+    match to_address {
+        None => Ok(false),
+        Some(address) => {
+            let code = provider.get_code_at(address).await.expect("couldn't fetch code");
+            if  code == Bytes::from_str("0x")? {
+                Ok(false)
+            }
+            else {
+                Ok(true)
+            }
+        }
+    }
+    
+}
+
+
+
+    
+
+// computes state updates and estimates for each transaction one by one, nicer for CLI
+pub async fn gas_estimate_block(
+    provider: impl Provider,
+    block_id: BlockId,
+    gk: GasKillerDefault,
+) -> Result<()> {
+        let block = provider
+        .get_block(block_id)
+        .await?
+        .expect("block retrieval failed");
+
+    for tx_hash in block.transactions.hashes() {
+        let receipt = provider.get_transaction_receipt(tx_hash).await?.expect("fetch transaction receipt failed");
+        let gas_used = receipt.gas_used;
+        if let Ok(true) = invokes_smart_contract(&provider, receipt).await {
+        println!("getting trace for transaction {:x}", tx_hash);
+        let Ok(trace) = get_tx_trace(&provider, tx_hash).await
+        else {
+            continue;
+        };
+        let Ok(state_updates) = compute_state_updates(trace).await
+        else {
+            continue;
+        };
+        println!("computing gas killer estimate for transaction");
+         let gas_estimate = gk
+        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+            .await?;
+        println!("actual gas used: {}, gas killer estimate: {}, percent savings: {:.2}", gas_used, gas_estimate, ((gas_used - gas_estimate)*100) as f64 / gas_used as f64);
+            
+        }
+        else {
+            continue;
+        }
+    
+    }
+    Ok(())
+}
+
+pub async fn gas_estimate_tx(
+    provider: impl Provider,
+    tx_hash: FixedBytes<32>,
+    gk: GasKillerDefault,
+) -> Result<()> {
+        let receipt = provider.get_transaction_receipt(tx_hash).await?.expect("fetch transaction receipt failed");
+        let gas_used = receipt.gas_used;
+        if let Ok(true) = invokes_smart_contract(&provider, receipt).await {
+        println!("analyzing transaction {:x}", tx_hash);
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+        let state_updates = compute_state_updates(trace).await?;
+        println!("computing gas killer estimate");
+         let gas_estimate = gk
+        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+            .await?;
+        println!("actual gas used: {}, gas killer estimate: {}, percent savings: {:.2}", gas_used, gas_estimate, ((gas_used - gas_estimate)*100) as f64 / gas_used as f64);
+            
+        }
+        else {
+        println!("transaction doesn't invoke a smart contract")
+        }
+    Ok(())    
+}
+
+
+
+
+// fetches all transaction traces and then computes state updates and estimates
 pub async fn fetch_encoded_state_updates_with_gas_estimate_block(
     provider: impl Provider,
-    block_number: &[u8],
+    block_id: BlockId,
     gk: GasKillerDefault,
-) -> Result<(Bytes, u64)> {
-    let trace = get_block_trace(&provider, block_number).await?;
+) -> Result<(Vec<Bytes>, Vec<u64>)> {
+    println!("getting traces for transactions in block...");
+        let trace = get_block_trace(&provider, block_id).await?;
+    println!("computing state updates for each transaction...");
     let state_updates = compute_state_updates_block(trace).await?;
-    let gas_estimate = gk
-        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
-        .await?;
-    Ok((encode_state_updates_to_abi(&state_updates), gas_estimate))
+    let mut gk_estimates = Vec::new();
+    let mut encoded_state_updates = Vec::new();
+    for updates in state_updates {
+        println!("estimating gas for a transaction...");
+        let gas_estimate = gk
+        .estimate_state_changes_gas(&updates, WarmSlotsRule::AllStore)
+            .await?;
+        gk_estimates.push(gas_estimate);
+        let encoded_updates =  encode_state_updates_to_abi(&updates);
+        encoded_state_updates.push(encoded_updates)
+    }
+    Ok((encoded_state_updates, gk_estimates))
 }
+
 
 pub async fn call_to_encoded_state_updates_with_gas_estimate(
     url: Url,
