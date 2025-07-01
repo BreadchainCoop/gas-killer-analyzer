@@ -1,45 +1,46 @@
 use alloy::{hex, providers::ProviderBuilder, signers::local::LocalSigner};
-use alloy_eips::{BlockId, RpcBlockHash};
+use alloy_eips::{BlockId, BlockNumberOrTag, RpcBlockHash};
 use alloy_rpc_types::TransactionRequest;
-use clap::Parser;
-use clap_derive::{Parser, Subcommand};
+use colored::Colorize;
 use gas_analyzer_rs::{
-    call_to_encoded_state_updates_with_gas_estimate, gas_estimate_block, gas_estimate_tx, gk::GasKillerDefault
+    call_to_encoded_state_updates_with_gas_estimate, gas_estimate_block, gas_estimate_tx,
+    gk::GasKillerDefault,
 };
+use std::env;
 use std::{fs::File, io::Read};
 use url::Url;
 
-#[derive(Parser, Debug)]
-#[command(version, about = "Gas Killer savings analyzer", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand, Debug)]
 enum Commands {
-    Block {
-        #[arg(long, help = "block number")]
-        hash: String,
-    },
-    Transaction {
-        #[arg(long, help = "transaction hash")]
-        hash: String,
-    },
-    Request {
-        #[arg(
-            short = 'f',
-            long = "file",
-            help = "transaction request (as JSON file)"
-        )]
-        file: String,
-    },
+    Block(String),
+    Transaction(String),
+    Request(String),
 }
 
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
-    let cli = Cli::parse();
+    let args: Vec<String> = env::args().collect();
+    let command: Option<Commands> = if args.len() < 3 {
+        None
+    } else {
+        let input_type: &str = &args[1];
+        match input_type {
+            "b" | "block" => {
+                let value = &args[2];
+                Some(Commands::Block(value.clone()))
+            }
+            "t" | "tx" => {
+                let value = &args[2];
+                Some(Commands::Transaction(value.clone()))
+            }
+            "r" | "request" => {
+                let value = &args[2];
+                Some(Commands::Request(value.clone()))
+            }
+            _ => None,
+        }
+    };
+
     let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
         .expect("TESTNET_RPC_URL must be set")
         .parse()
@@ -47,10 +48,24 @@ async fn main() {
     let gk = GasKillerDefault::new()
         .await
         .expect("unable to initialize GasKiller");
-    match &cli.command {
-        Commands::Block { hash } => {
-            let id = hex::const_decode_to_array(hash.as_bytes())
-                .expect("failed to decode transaction hash");
+    match command {
+        Some(Commands::Block(hash)) => {
+            let identifier = match hash.as_ref() {
+                "latest" => BlockId::Number(BlockNumberOrTag::Latest),
+                "finalized" => BlockId::Number(BlockNumberOrTag::Finalized),
+                "safe" => BlockId::Number(BlockNumberOrTag::Safe),
+                "earliest" => BlockId::Number(BlockNumberOrTag::Earliest),
+                "pending" => BlockId::Number(BlockNumberOrTag::Pending),
+                _ => {
+                    let id = hex::const_decode_to_array(hash.as_bytes())
+                        .expect("failed to decode transaction hash");
+                    BlockId::Hash(RpcBlockHash {
+                        block_hash: id.into(),
+                        require_canonical: None,
+                    })
+                }
+            };
+
             let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
             let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
             let bytes = hex::decode(private_key).expect("Invalid private key hex");
@@ -58,20 +73,12 @@ async fn main() {
             let provider = ProviderBuilder::new()
                 .wallet(signer)
                 .connect_http(rpc_url.clone());
-            let estimate = gas_estimate_block(
-                provider,
-                BlockId::Hash(RpcBlockHash {
-                    block_hash: id.into(),
-                    require_canonical: None,
-                }), // TODO: allow pattern matching over variants of BlockID
-                gk,
-            )
-            .await;
+            let estimate = gas_estimate_block(provider, identifier, gk).await;
             if let Err(e) = estimate {
                 println!("Error! {}", e)
             }
         }
-        Commands::Transaction { hash } => {
+        Some(Commands::Transaction(hash)) => {
             let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
             let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
             let bytes = hex::decode(private_key).expect("Invalid private key hex");
@@ -81,18 +88,13 @@ async fn main() {
                 .connect_http(rpc_url.clone());
             let bytes: [u8; 32] = hex::const_decode_to_array(hash.as_bytes())
                 .expect("failed to decode transaction hash");
-           
-            let estimate = gas_estimate_tx  (
-                provider,
-                bytes.into(),
-                gk,
-            )
-            .await;
+
+            let estimate = gas_estimate_tx(provider, bytes.into(), gk).await;
             if let Err(e) = estimate {
                 println!("Error! {}", e)
             }
         }
-        Commands::Request { file } => {
+        Some(Commands::Request(file)) => {
             let mut file = File::open(file).expect("couldn't find file");
             let mut contents = String::new();
             file.read_to_string(&mut contents)
@@ -106,6 +108,18 @@ async fn main() {
             } else {
                 println!("estimation failed!");
             }
+        }
+        None => {
+            println!("failed to recognize input, please check your arguments again:\n");
+            println!(
+                "{} for blocks",
+                "b/block [<HASH> | latest | pending | finalized | safe | earliest]".bold()
+            );
+            println!("{} for accepted transactions", "t/tx <HASH>".bold());
+            println!(
+                "{} for transaction requests",
+                "r/request <JSON_FILE>".bold()
+            );
         }
     }
 }
