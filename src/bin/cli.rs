@@ -1,4 +1,4 @@
-use alloy::{hex, providers::ProviderBuilder, signers::local::LocalSigner};
+use alloy::{hex, providers::ProviderBuilder};
 use alloy_eips::{BlockId, BlockNumberOrTag, RpcBlockHash};
 use alloy_rpc_types::TransactionRequest;
 use colored::Colorize;
@@ -66,26 +66,14 @@ async fn main() {
                 }
             };
 
-            let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
-            let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
-            let bytes = hex::decode(private_key).expect("Invalid private key hex");
-            let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-            let provider = ProviderBuilder::new()
-                .wallet(signer)
-                .connect_http(rpc_url.clone());
+            let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
             let estimate = gas_estimate_block(provider, identifier, gk).await;
             if let Err(e) = estimate {
                 println!("Error! {}", e)
             }
         }
         Some(Commands::Transaction(hash)) => {
-            let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
-            let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
-            let bytes = hex::decode(private_key).expect("Invalid private key hex");
-            let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-            let provider = ProviderBuilder::new()
-                .wallet(signer)
-                .connect_http(rpc_url.clone());
+            let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
             let bytes: [u8; 32] = hex::const_decode_to_array(hash.as_bytes())
                 .expect("failed to decode transaction hash");
 

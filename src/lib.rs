@@ -410,11 +410,7 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::{
-        hex,
-        primitives::{U256, address, b256, bytes},
-        signers::local::LocalSigner,
-    };
+    use alloy::primitives::{U256, address, b256, bytes};
     use constants::*;
     use sol_types::SimpleStorage;
 
@@ -425,11 +421,7 @@ mod tests {
         let rpc_url = std::env::var("TESTNET_RPC_URL")
             .expect("TESTNET_RPC_URL must be set")
             .parse()?;
-        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
-        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
-        let bytes = hex::decode(private_key).expect("Invalid private key hex");
-        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-        let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
@@ -478,11 +470,7 @@ mod tests {
         let rpc_url = std::env::var("TESTNET_RPC_URL")
             .expect("TESTNET_RPC_URL must be set")
             .parse()?;
-        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
-        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
-        let bytes = hex::decode(private_key).expect("Invalid private key hex");
-        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-        let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_DEPOSIT_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
@@ -529,11 +517,7 @@ mod tests {
         let rpc_url = std::env::var("TESTNET_RPC_URL")
             .expect("TESTNET_RPC_URL must be set")
             .parse()?;
-        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
-        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
-        let bytes = hex::decode(private_key).expect("Invalid private key hex");
-        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-        let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_CALL_EXTERNAL_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
@@ -562,13 +546,7 @@ mod tests {
         let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
             .expect("TESTNET_RPC_URL must be set")
             .parse()?;
-        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
-        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
-        let bytes = hex::decode(private_key).expect("Invalid private key hex");
-        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-        let provider = ProviderBuilder::new()
-            .wallet(signer)
-            .connect_http(rpc_url.clone());
+        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
 
         let simple_storage = SimpleStorage::deploy(&provider).await?;
         let tx_request = simple_storage.set(U256::from(1)).into_transaction_request();
