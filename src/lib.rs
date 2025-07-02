@@ -247,7 +247,7 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
     Bytes::copy_from_slice(&encoded)
 }
 
-pub async fn fetch_encoded_state_updates(
+pub async fn tx_to_encoded_state_updates(
     provider: impl Provider,
     tx_hash: FixedBytes<32>,
 ) -> Result<Bytes> {
@@ -255,7 +255,7 @@ pub async fn fetch_encoded_state_updates(
     let state_updates = compute_state_updates(trace).await?;
     Ok(encode_state_updates_to_abi(&state_updates))
 }
-pub async fn call_to_encoded_state_updates(
+pub async fn tx_request_to_encoded_state_updates(
     url: Url,
     tx_request: TransactionRequest,
 ) -> Result<Bytes> {
@@ -264,7 +264,7 @@ pub async fn call_to_encoded_state_updates(
     Ok(encode_state_updates_to_abi(&state_updates))
 }
 
-pub async fn fetch_encoded_state_updates_with_gas_estimate(
+pub async fn tx_to_encoded_state_updates_with_gas_estimate(
     provider: impl Provider,
     tx_hash: FixedBytes<32>,
     gk: GasKillerDefault,
@@ -371,7 +371,7 @@ pub async fn gas_estimate_tx(
 }
 
 // fetches all transaction traces and then computes state updates and estimates
-pub async fn fetch_encoded_state_updates_with_gas_estimate_block(
+pub async fn tx_to_encoded_state_updates_with_gas_estimate_block(
     provider: impl Provider,
     block_id: BlockId,
     gk: GasKillerDefault,
