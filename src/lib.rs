@@ -73,10 +73,6 @@ fn append_to_state_updates(
             let args_offset: usize = stack[3].try_into().expect("invalid args offset");
             let args_length: usize = stack[4].try_into().expect("invalid args length");
             let args = copy_memory(&memory, args_offset, args_length);
-            let target = Address::from_word(stack[1].into());
-            println!("target: {:?}", target);
-            let value = stack[2];
-            let callargs: Bytes = args.clone().into();
             state_updates.push(StateUpdate::Call(IStateUpdateTypes::Call {
                 target: Address::from_word(stack[1].into()),
                 value: stack[2],
