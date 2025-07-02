@@ -41,8 +41,8 @@ async fn main() {
         }
     };
 
-    let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
-        .expect("TESTNET_RPC_URL must be set")
+    let rpc_url: Url = std::env::var("RPC_URL")
+        .expect("RPC_URL must be set")
         .parse()
         .expect("unable to parse rpc url");
     let gk = GasKillerDefault::new()
