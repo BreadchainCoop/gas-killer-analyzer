@@ -11,6 +11,7 @@ sol! {
         LOG4
     }
 
+    #[derive(Debug)]
     interface IStateUpdateTypes {
         struct Store {
             bytes32 slot;
@@ -112,6 +113,7 @@ sol! {
 }
 
 #[allow(warnings)]
+#[derive(Debug)]
 pub enum StateUpdate {
     Store(IStateUpdateTypes::Store),
     Call(IStateUpdateTypes::Call),
