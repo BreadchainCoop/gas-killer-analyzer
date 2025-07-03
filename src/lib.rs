@@ -287,8 +287,7 @@ pub async fn invokes_smart_contract(
         Some(address) => {
             let code = provider
                 .get_code_at(address)
-                .await
-                .expect("couldn't fetch code");
+                .await?
             if code == Bytes::from_str("0x")? {
                 Ok(false)
             } else {
