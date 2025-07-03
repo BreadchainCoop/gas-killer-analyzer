@@ -313,16 +313,13 @@ pub async fn gas_estimate_block(
     block_id: BlockId,
     gk: GasKillerDefault,
 ) -> Result<()> {
-    let block = provider
-        .get_block(block_id)
+    let receipts = provider
+        .get_block_receipts(block_id)
         .await?
-        .expect("block retrieval failed");
+        .expect("block receipts retrieval failed");
 
-    for tx_hash in block.transactions.hashes() {
-        let receipt = provider
-            .get_transaction_receipt(tx_hash)
-            .await?
-            .expect("fetch transaction receipt failed");
+    for receipt in receipts {
+        let tx_hash = receipt.transaction_hash;
         let gas_used = receipt.gas_used;
         if let Ok(true) = invokes_smart_contract(&provider, receipt).await {
             println!("getting trace for transaction {:x}", tx_hash);
