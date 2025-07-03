@@ -13,7 +13,7 @@ use alloy::{
     signers::local::PrivateKeySigner,
     sol,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 sol!(
     #[sol(rpc)]
@@ -87,8 +87,10 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
             .send()
             .await?;
 
-        // TODO: how do I check transaction was successful?
         let receipt = tx.get_receipt().await?;
+        if !receipt.status() {
+            bail!("Transaction failed");
+        }
 
         self.cool_slots(temperature_slots).await?;
         Ok(receipt.gas_used)

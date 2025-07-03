@@ -18,7 +18,7 @@ use alloy::{
     sol_types::SolValue,
 };
 use alloy_eips::eip1898::BlockId;
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use gk::{GasKillerDefault, WarmSlotsRule};
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
 use url::Url;
@@ -153,6 +153,15 @@ async fn compute_state_updates_block(trace: Vec<DefaultFrame>) -> Result<Vec<Vec
 }
 
 async fn get_tx_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
+    let tx_receipt = provider
+        .get_transaction_receipt(tx_hash)
+        .await?
+        .ok_or_else(|| anyhow!("could not get receipt for tx {}", tx_hash))?;
+
+    if !tx_receipt.status() {
+        bail!("transaction failed");
+    }
+
     let options = GethDebugTracingOptions {
         config: GethDefaultTracingOptions {
             enable_memory: Some(true),
@@ -179,7 +188,15 @@ pub async fn get_trace_from_call(
             .arg("--steps-tracing")
             .arg("--auto-impersonate")
     })?;
-    let tx_hash = provider.send_transaction(tx_request).await?.watch().await?;
+    let tx_receipt = provider
+        .send_transaction(tx_request)
+        .await?
+        .get_receipt()
+        .await?;
+    if !tx_receipt.status() {
+        bail!("transaction failed");
+    }
+    let tx_hash = tx_receipt.transaction_hash;
     get_tx_trace(&provider, tx_hash).await
 }
 
