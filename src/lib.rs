@@ -153,16 +153,6 @@ async fn compute_state_updates(trace: DefaultFrame) -> Result<Vec<StateUpdate>> 
     Ok(state_updates)
 }
 
-async fn compute_state_updates_block(trace: Vec<DefaultFrame>) -> Result<Vec<Vec<StateUpdate>>> {
-    let mut state_updates: Vec<Vec<StateUpdate>> = Vec::new();
-    for frame in trace {
-        if let Ok(new_update) = compute_state_updates(frame).await {
-            state_updates.push(new_update);
-        }
-    }
-    Ok(state_updates)
-}
-
 async fn get_tx_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
     let tx_receipt = provider
         .get_transaction_receipt(tx_hash)
@@ -297,7 +287,7 @@ pub async fn invokes_smart_contract(
         Some(address) => {
             let code = provider
                 .get_code_at(address)
-                .await?
+                .await?;
             if code == Bytes::from_str("0x")? {
                 Ok(false)
             } else {
