@@ -18,7 +18,7 @@ use alloy::{
     sol_types::SolValue,
 };
 use alloy_eips::eip1898::BlockId;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use gk::{GasKillerDefault, WarmSlotsRule};
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
 use url::Url;
@@ -206,7 +206,11 @@ pub async fn get_trace_from_call(
             .arg("--steps-tracing")
             .arg("--auto-impersonate")
     })?;
-    let tx_receipt = provider.send_transaction(tx_request).await?.get_receipt().await?;
+    let tx_receipt = provider
+        .send_transaction(tx_request)
+        .await?
+        .get_receipt()
+        .await?;
     if !tx_receipt.status() {
         bail!("transaction failed");
     }
