@@ -1,7 +1,9 @@
 use alloy::{hex, providers::ProviderBuilder};
 use alloy_eips::{BlockId, BlockNumberOrTag, RpcBlockHash};
 use alloy_rpc_types::TransactionRequest;
+use anyhow::Result;
 use colored::Colorize;
+use csv::Writer;
 use gas_analyzer_rs::{
     call_to_encoded_state_updates_with_gas_estimate, gas_estimate_block, gas_estimate_tx,
     gk::GasKillerDefault,
@@ -24,6 +26,7 @@ async fn main() {
         None
     } else {
         let input_type: &str = &args[1];
+
         match input_type {
             "b" | "block" => {
                 let value = &args[2];
@@ -41,6 +44,10 @@ async fn main() {
         }
     };
 
+    let _ = execute_command(command).await;
+}
+
+async fn execute_command(cmd: Option<Commands>) -> Result<()> {
     let rpc_url: Url = std::env::var("RPC_URL")
         .expect("RPC_URL must be set")
         .parse()
@@ -48,7 +55,7 @@ async fn main() {
     let gk = GasKillerDefault::new()
         .await
         .expect("unable to initialize GasKiller");
-    match command {
+    match cmd {
         Some(Commands::Block(hash)) => {
             let identifier = match hash.as_ref() {
                 "latest" => BlockId::Number(BlockNumberOrTag::Latest),
@@ -67,21 +74,25 @@ async fn main() {
             };
 
             let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
-            let estimate = gas_estimate_block(provider, identifier, gk).await;
-            if let Err(e) = estimate {
-                println!("Error! {}", e)
-            }
+            println!("generating gaskiller reports...");
+            let reports = gas_estimate_block(provider, identifier, gk).await?;
+            let mut writer = Writer::from_path("../../reports/{hash}.csv")?;
+            let _ = reports.iter().map(|report| writer.serialize(report));
+            writer.flush()?;
+            println!("successfully wrote data to reports/{hash}.csv");
         }
         Some(Commands::Transaction(hash)) => {
             let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
             let bytes: [u8; 32] = hex::const_decode_to_array(hash.as_bytes())
                 .expect("failed to decode transaction hash");
-
-            let estimate = gas_estimate_tx(provider, bytes.into(), gk).await;
-            if let Err(e) = estimate {
-                println!("Error! {}", e)
-            }
+            println!("generating gaskiller report...");
+            let report = gas_estimate_tx(provider, bytes.into(), gk).await?;
+            let mut writer = Writer::from_path("../../reports/{hash}.csv")?;
+            writer.serialize(report)?;
+            writer.flush()?;
+            println!("successfully wrote data to reports/{hash}.csv");
         }
+
         Some(Commands::Request(file)) => {
             let mut file = File::open(file).expect("couldn't find file");
             let mut contents = String::new();
@@ -89,7 +100,7 @@ async fn main() {
                 .expect("unable to read file contents");
             let request = serde_json::from_str::<TransactionRequest>(contents.as_ref())
                 .expect("unable to read json data");
-            if let Ok((_, estimate)) =
+            if let Ok((_, estimate, _)) =
                 call_to_encoded_state_updates_with_gas_estimate(rpc_url, request, gk).await
             {
                 println!("gas killer estimate: {estimate}");
@@ -110,4 +121,5 @@ async fn main() {
             );
         }
     }
+    Ok(())
 }
