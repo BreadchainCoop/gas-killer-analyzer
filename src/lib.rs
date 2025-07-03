@@ -53,14 +53,12 @@ fn append_to_state_updates(
     let memory = match struct_log.memory {
         Some(memory) => parse_trace_memory(memory),
         None => match struct_log.op.as_str() {
-            "CALL" if struct_log.depth == 1 => bail!("There is no memory for CALL in depth 1"),
+            "CALL" | "LOG0" | "LOG1" | "LOG2" | "LOG3" | "LOG4" if struct_log.depth == 1 => {
+                bail!("There is no memory for {:?} in depth 1", struct_log.op)
+            }
             _ => return Ok(()),
         },
     };
-    // we don't care about state changes in inner calls
-    if struct_log.depth != 1 {
-        return Ok(());
-    }
     match struct_log.op.as_str() {
         "DELEGATECALL" | "CALLCODE" | "CREATE" | "CREATE2" | "SELFDESTRUCT" => {
             bail!("Opcode not allowed: {:?}", struct_log.op)
@@ -136,8 +134,21 @@ fn append_to_state_updates(
 
 async fn compute_state_updates(trace: DefaultFrame) -> Result<Vec<StateUpdate>> {
     let mut state_updates: Vec<StateUpdate> = Vec::new();
+    // depth for which we care about state updates happening in
+    let mut target_depth = 1;
     for struct_log in trace.struct_logs {
-        append_to_state_updates(&mut state_updates, struct_log)?;
+        // Whenever stepping up (leaving a CALL/CALLCODE/DELEGATECALL) reset the target depth
+        if struct_log.depth < target_depth {
+            target_depth = struct_log.depth;
+        } else if struct_log.depth == target_depth {
+            // If we're going to step into a new execution context, increase the target depth
+            // else, try to add the state update
+            if struct_log.op.as_str() == "DELEGATECALL" || struct_log.op.as_str() == "CALLCODE" {
+                target_depth = struct_log.depth + 1;
+            } else {
+                append_to_state_updates(&mut state_updates, struct_log)?;
+            }
+        }
     }
     Ok(state_updates)
 }
@@ -485,6 +496,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_compute_state_updates_delegatecall() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
+            .parse()?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
+
+        let tx_hash = DELEGATECALL_CONTRACT_MAIN_RUN_TX_HASH;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+        let state_updates = compute_state_updates(trace).await?;
+
+        assert_eq!(state_updates.len(), 4);
+        let StateUpdate::Store(IStateUpdateTypes::Store { slot, value }) = &state_updates[0] else {
+            bail!("Expected Store, got {:?}", state_updates[0]);
+        };
+        assert_eq!(
+            slot,
+            &b256!("0x0000000000000000000000000000000000000000000000000000000000000003")
+        );
+        assert_eq!(
+            value,
+            &b256!("0x0000000000000000000000000000000000000000000000000000000000000001")
+        );
+
+        let StateUpdate::Call(IStateUpdateTypes::Call {
+            target,
+            value,
+            callargs,
+        }) = &state_updates[1]
+        else {
+            bail!("Expected Call, got {:?}", state_updates[1]);
+        };
+        assert_eq!(target, &DELEGATE_CONTRACT_A_ADDRESS);
+        assert_eq!(value, &U256::from(0));
+        assert_eq!(callargs, &bytes!("0xaea01afc"));
+
+        let StateUpdate::Store(IStateUpdateTypes::Store { slot, value }) = &state_updates[2] else {
+            bail!("Expected Store, got {:?}", state_updates[2]);
+        };
+        assert_eq!(
+            slot,
+            &b256!("0x0000000000000000000000000000000000000000000000000000000000000002")
+        );
+        assert_eq!(
+            value,
+            &b256!("0x0000000000000000000000000000000000000000000000000de0b6b3a7640000")
+        ); // 1 ether (use cast to-dec)
+
+        let StateUpdate::Store(IStateUpdateTypes::Store { slot, value }) = &state_updates[3] else {
+            bail!("Expected Store, got {:?}", state_updates[3]);
+        };
+        assert_eq!(
+            slot,
+            &b256!("0x0000000000000000000000000000000000000000000000000000000000000002")
+        );
+        assert_eq!(
+            value,
+            &b256!("0x00000000000000000000000000000000000000000000000029a2241af62c0000")
+        ); // 3 ether (use cast to-dec)
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_compute_state_updates_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -520,9 +596,11 @@ mod tests {
         let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
+
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
 
-        let simple_storage = SimpleStorage::deploy(&provider).await?;
+        let simple_storage =
+            SimpleStorage::SimpleStorageInstance::new(SIMPLE_STORAGE_ADDRESS, &provider);
         let tx_request = simple_storage.set(U256::from(1)).into_transaction_request();
 
         let trace = get_trace_from_call(rpc_url, tx_request).await?;
