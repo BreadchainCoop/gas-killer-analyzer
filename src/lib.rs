@@ -221,13 +221,13 @@ fn encode_state_updates_to_sol(
         .iter()
         .map(|state_update| {
             Bytes::copy_from_slice(&match state_update {
-                StateUpdate::Store(x) => x.abi_encode(),
-                StateUpdate::Call(x) => x.abi_encode(),
-                StateUpdate::Log0(x) => x.abi_encode(),
-                StateUpdate::Log1(x) => x.abi_encode(),
-                StateUpdate::Log2(x) => x.abi_encode(),
-                StateUpdate::Log3(x) => x.abi_encode(),
-                StateUpdate::Log4(x) => x.abi_encode(),
+                StateUpdate::Store(x) => { x.abi_encode_sequence() },
+                StateUpdate::Call(x) => { x.abi_encode_sequence() },
+                StateUpdate::Log0(x) => { x.abi_encode_sequence() },
+                StateUpdate::Log1(x) => { x.abi_encode_sequence() },
+                StateUpdate::Log2(x) => { x.abi_encode_sequence() },
+                StateUpdate::Log3(x) => { x.abi_encode_sequence() },
+                StateUpdate::Log4(x) => { x.abi_encode_sequence() },
             })
         })
         .collect::<Vec<_>>();
@@ -403,7 +403,7 @@ mod tests {
         let gas_estimate = gk
             .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
             .await?;
-        assert_eq!(gas_estimate, 32958);
+        assert_eq!(gas_estimate, 32549);
 
         assert_eq!(state_updates.len(), 2);
         assert!(matches!(state_updates[0], StateUpdate::Store(_)));
