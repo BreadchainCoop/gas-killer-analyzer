@@ -8,7 +8,7 @@ use gas_analyzer_rs::{
     call_to_encoded_state_updates_with_gas_estimate, gas_estimate_block, gas_estimate_tx,
     gk::GasKillerDefault,
 };
-use std::env;
+use std::{env, fs};
 use std::{fs::File, io::Read};
 use url::Url;
 
@@ -44,7 +44,10 @@ async fn main() {
         }
     };
 
-    let _ = execute_command(command).await;
+    let result = execute_command(command).await;
+    if let Err(e) = result {
+        println!("{:?}", e);
+    }
 }
 
 async fn execute_command(cmd: Option<Commands>) -> Result<()> {
@@ -56,15 +59,15 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
         .await
         .expect("unable to initialize GasKiller");
     match cmd {
-        Some(Commands::Block(hash)) => {
-            let identifier = match hash.as_ref() {
+        Some(Commands::Block(hash_or_tag)) => {
+            let identifier = match hash_or_tag.as_ref() {
                 "latest" => BlockId::Number(BlockNumberOrTag::Latest),
                 "finalized" => BlockId::Number(BlockNumberOrTag::Finalized),
                 "safe" => BlockId::Number(BlockNumberOrTag::Safe),
                 "earliest" => BlockId::Number(BlockNumberOrTag::Earliest),
                 "pending" => BlockId::Number(BlockNumberOrTag::Pending),
                 _ => {
-                    let id = hex::const_decode_to_array(hash.as_bytes())
+                    let id = hex::const_decode_to_array(hash_or_tag.as_bytes())
                         .expect("failed to decode transaction hash");
                     BlockId::Hash(RpcBlockHash {
                         block_hash: id.into(),
@@ -75,19 +78,28 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
 
             let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
             println!("generating gaskiller reports...");
-            let reports = gas_estimate_block(provider, identifier, gk).await?;
-            let mut writer = Writer::from_path("../../reports/{hash}.csv")?;
-            let _ = reports.iter().map(|report| writer.serialize(report));
-            writer.flush()?;
-            println!("successfully wrote data to reports/{hash}.csv");
+            let (reports, block_hash) = gas_estimate_block(provider, identifier, gk).await?;
+            fs::create_dir_all("reports")?;
+
+            let _ = File::create(format!("reports/{block_hash}.csv"))?;
+            let mut writer = Writer::from_path(format!("reports/{block_hash}.csv"))?;
+            for report in reports {
+                writer.serialize(report)?;
+                writer.flush()?;
+            }
+
+            println!("successfully wrote data to reports/{block_hash}.csv");
         }
         Some(Commands::Transaction(hash)) => {
             let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
             let bytes: [u8; 32] = hex::const_decode_to_array(hash.as_bytes())
                 .expect("failed to decode transaction hash");
-            println!("generating gaskiller report...");
+
             let report = gas_estimate_tx(provider, bytes.into(), gk).await?;
-            let mut writer = Writer::from_path("../../reports/{hash}.csv")?;
+            fs::create_dir_all("reports")?;
+            let _ = File::create(format!("reports/{hash}.csv"))?;
+            let mut writer = Writer::from_path(format!("reports/{hash}.csv"))?;
+
             writer.serialize(report)?;
             writer.flush()?;
             println!("successfully wrote data to reports/{hash}.csv");

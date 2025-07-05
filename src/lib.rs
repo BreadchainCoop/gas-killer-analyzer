@@ -230,13 +230,13 @@ fn encode_state_updates_to_sol(
         .iter()
         .map(|state_update| {
             Bytes::copy_from_slice(&match state_update {
-                StateUpdate::Store(x) => { x.abi_encode_sequence() },
-                StateUpdate::Call(x) => { x.abi_encode_sequence() },
-                StateUpdate::Log0(x) => { x.abi_encode_sequence() },
-                StateUpdate::Log1(x) => { x.abi_encode_sequence() },
-                StateUpdate::Log2(x) => { x.abi_encode_sequence() },
-                StateUpdate::Log3(x) => { x.abi_encode_sequence() },
-                StateUpdate::Log4(x) => { x.abi_encode_sequence() },
+                StateUpdate::Store(x) => x.abi_encode_sequence(),
+                StateUpdate::Call(x) => x.abi_encode_sequence(),
+                StateUpdate::Log0(x) => x.abi_encode_sequence(),
+                StateUpdate::Log1(x) => x.abi_encode_sequence(),
+                StateUpdate::Log2(x) => x.abi_encode_sequence(),
+                StateUpdate::Log3(x) => x.abi_encode_sequence(),
+                StateUpdate::Log4(x) => x.abi_encode_sequence(),
             })
         })
         .collect::<Vec<_>>();
@@ -279,27 +279,32 @@ pub async fn gas_estimate_block(
     provider: impl Provider,
     block_id: BlockId,
     gk: GasKillerDefault,
-) -> Result<Vec<GasKillerReport>> {
+) -> Result<(Vec<GasKillerReport>, FixedBytes<32>)> {
     let receipts = provider
         .get_block_receipts(block_id)
         .await?
         .expect("block receipts retrieval failed");
+    let block_hash = receipts[0]
+        .block_hash
+        .expect("couldn't find block hash in receipt");
+    println!("got {} receipts for block {}", receipts.len(), block_hash);
     let mut reports = Vec::new();
     for receipt in receipts {
         let smart_contract_tx = invokes_smart_contract(&provider, &receipt).await?;
-
+        let tx_hash = receipt.transaction_hash;
         if !smart_contract_tx {
+            println!("tx 0x{:x} does not call a smart contract", tx_hash);
             continue;
         }
-        let tx_hash = receipt.transaction_hash;
-        println!("getting report for {:x}", tx_hash);
+        println!("getting report for 0x{:x}", tx_hash);
         let details = gaskiller_reporter(&provider, tx_hash, &gk, &receipt).await;
         if let Err(e) = &details {
-            reports.push(GasKillerReport::report_error(e));
+            reports.push(GasKillerReport::report_error(&receipt, e));
+            continue;
         }
         reports.push(GasKillerReport::from(&receipt, details.unwrap()));
     }
-    Ok(reports)
+    Ok((reports, block_hash))
 }
 
 pub async fn gas_estimate_tx(
@@ -318,7 +323,7 @@ pub async fn gas_estimate_tx(
     }
     let details = gaskiller_reporter(provider, tx_hash, &gk, &receipt).await;
     if let Err(e) = details {
-        return Ok(GasKillerReport::report_error(&e));
+        return Ok(GasKillerReport::report_error(&receipt, &e));
     }
 
     Ok(GasKillerReport::from(&receipt, details.unwrap()))
@@ -335,11 +340,11 @@ pub async fn gaskiller_reporter(
         .await?
         .ok_or_else(|| anyhow!("could not get receipt for tx {}", tx_hash))?;
     let trace = get_tx_trace(&provider, tx_hash).await?;
-    let (state_updates, skipped_opcodes) = compute_state_updates(trace).await?;
+    let (state_updates, opcodes) = compute_state_updates(trace).await?;
     let gas_used = receipt.gas_used as u128;
     let effective_gas_price = receipt.effective_gas_price;
     let gas_cost = effective_gas_price * gas_used;
-
+    let skipped_opcodes = opcodes.into_iter().collect::<Vec<_>>().join(", ");
     let gaskiller_gas_estimate = gk
         .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
         .await?;
@@ -351,12 +356,14 @@ pub async fn gaskiller_reporter(
         gas_cost,
         gaskiller_gas_estimate: gaskiller_gas_estimate.into(),
         gaskiller_estimated_gas_cost,
-        percent_savings: ((gas_used - gaskiller_gas_estimate as u128) * 100u128) as f64
+        percent_savings: ((gas_used.saturating_sub(gaskiller_gas_estimate as u128)) * 100u128)
+            as f64
             / gas_used as f64,
         function_selector,
         skipped_opcodes,
     })
 }
+
 pub async fn call_to_encoded_state_updates_with_gas_estimate(
     url: Url,
     tx_request: TransactionRequest,
@@ -376,11 +383,39 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
 
 #[cfg(test)]
 mod tests {
+    use std::fs::{self, File};
+
     use super::*;
-    use alloy::primitives::{U256, address, b256, bytes};
+    use alloy::{
+        hex,
+        primitives::{U256, address, b256, bytes},
+    };
     use constants::*;
+    use csv::Writer;
     use sol_types::SimpleStorage;
 
+    #[tokio::test]
+    async fn test_csv_writer() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
+            .parse()?;
+
+        let hash = "0x0df13f90b94773887709ce26216928c952e2d7f6d5af44198504ac6899fc5165";
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
+        let bytes: [u8; 32] =
+            hex::const_decode_to_array(hash.as_bytes()).expect("failed to decode transaction hash");
+        let gk = GasKillerDefault::new().await?;
+        let report = gas_estimate_tx(provider, bytes.into(), gk).await?;
+        fs::create_dir_all("reports")?;
+        let _ = File::create("reports/test.csv")?;
+        let mut writer = Writer::from_path("reports/test.csv")?;
+
+        writer.serialize(report)?;
+        writer.flush()?;
+        Ok(())
+    }
     #[tokio::test]
     async fn test_compute_state_updates_set() -> Result<()> {
         dotenv::dotenv().ok();
