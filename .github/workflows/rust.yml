@@ -17,9 +17,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Install foundry
     - uses: jaxxstorm/action-install-gh-release@v1.10.0
-      with: # Grab the latest version
-      repo: foundry-rs/foundry
+      with: 
+        repo: foundry-rs/foundry
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose
