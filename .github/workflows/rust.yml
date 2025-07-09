@@ -8,7 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  
+  TESTNET_RPC_URL: https://compatible-floral-sponge.ethereum-holesky.quiknode.pro/5208c2ae65694338de5f5a883442970cf04fefe0
+  RPC_URL: https://withered-convincing-meadow.quiknode.pro/89fd706450ed0a8279f87c01e52ae78d9b308ce7/
 
 jobs:
   build:
@@ -19,4 +20,6 @@ jobs:
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose
+    - name: Test
+      run: cargo test --verbose
    
