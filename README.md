@@ -40,4 +40,4 @@ cargo run -- r path/to/file.json
 ```
 
 
-For a block/transaction, the analysis report is written to `reports/{hash}.csv` where `hash` is the block/transaction hash.
+The analysis report is written to `reports.csv`.
