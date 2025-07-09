@@ -1,11 +1,15 @@
+#[allow(dead_code)]
 mod constants;
+pub mod gk;
 mod sol_types;
-mod gk;
+
+use std::str::FromStr;
 
 use alloy::{
     primitives::{Address, Bytes, FixedBytes},
     providers::{Provider, ProviderBuilder, ext::DebugApi},
     rpc::types::{
+        TransactionReceipt,
         eth::TransactionRequest,
         trace::geth::{
             DefaultFrame, GethDebugTracingOptions, GethDefaultTracingOptions, GethTrace, StructLog,
@@ -13,13 +17,20 @@ use alloy::{
     },
     sol_types::SolValue,
 };
+use alloy_eips::eip1898::BlockId;
+use anyhow::{Result, anyhow, bail};
 use gk::{GasKillerDefault, WarmSlotsRule};
-use anyhow::{Result, bail};
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
 use url::Url;
 
 fn copy_memory(memory: &[u8], offset: usize, length: usize) -> Vec<u8> {
-    memory[offset..offset + length].to_vec()
+    if memory.len() >= offset + length {
+        memory[offset..offset + length].to_vec()
+    } else {
+        let mut memory = memory.to_vec();
+        memory.resize(offset + length, 0);
+        memory[offset..offset + length].to_vec()
+    }
 }
 
 fn parse_trace_memory(memory: Vec<String>) -> Vec<u8> {
@@ -42,14 +53,12 @@ fn append_to_state_updates(
     let memory = match struct_log.memory {
         Some(memory) => parse_trace_memory(memory),
         None => match struct_log.op.as_str() {
-            "CALL" if struct_log.depth == 1 => bail!("There is no memory for CALL in depth 1"),
+            "CALL" | "LOG0" | "LOG1" | "LOG2" | "LOG3" | "LOG4" if struct_log.depth == 1 => {
+                bail!("There is no memory for {:?} in depth 1", struct_log.op)
+            }
             _ => return Ok(()),
         },
     };
-    // we don't care about state changes in inner calls
-    if struct_log.depth != 1 {
-        return Ok(());
-    }
     match struct_log.op.as_str() {
         "DELEGATECALL" | "CALLCODE" | "CREATE" | "CREATE2" | "SELFDESTRUCT" => {
             bail!("Opcode not allowed: {:?}", struct_log.op)
@@ -64,7 +73,7 @@ fn append_to_state_updates(
             let args = copy_memory(&memory, args_offset, args_length);
             state_updates.push(StateUpdate::Call(IStateUpdateTypes::Call {
                 target: Address::from_word(stack[1].into()),
-                value: stack[2].into(),
+                value: stack[2],
                 callargs: args.into(),
             }));
         }
@@ -125,13 +134,35 @@ fn append_to_state_updates(
 
 async fn compute_state_updates(trace: DefaultFrame) -> Result<Vec<StateUpdate>> {
     let mut state_updates: Vec<StateUpdate> = Vec::new();
+    // depth for which we care about state updates happening in
+    let mut target_depth = 1;
     for struct_log in trace.struct_logs {
-        append_to_state_updates(&mut state_updates, struct_log)?;
+        // Whenever stepping up (leaving a CALL/CALLCODE/DELEGATECALL) reset the target depth
+        if struct_log.depth < target_depth {
+            target_depth = struct_log.depth;
+        } else if struct_log.depth == target_depth {
+            // If we're going to step into a new execution context, increase the target depth
+            // else, try to add the state update
+            if struct_log.op.as_str() == "DELEGATECALL" || struct_log.op.as_str() == "CALLCODE" {
+                target_depth = struct_log.depth + 1;
+            } else {
+                append_to_state_updates(&mut state_updates, struct_log)?;
+            }
+        }
     }
     Ok(state_updates)
 }
 
-async fn get_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
+async fn get_tx_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
+    let tx_receipt = provider
+        .get_transaction_receipt(tx_hash)
+        .await?
+        .ok_or_else(|| anyhow!("could not get receipt for tx {}", tx_hash))?;
+
+    if !tx_receipt.status() {
+        bail!("transaction failed");
+    }
+
     let options = GethDebugTracingOptions {
         config: GethDefaultTracingOptions {
             enable_memory: Some(true),
@@ -139,6 +170,7 @@ async fn get_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result
         },
         ..Default::default()
     };
+
     let GethTrace::Default(trace) = provider.debug_trace_transaction(tx_hash, options).await?
     else {
         return Err(anyhow::anyhow!("Expected default trace"));
@@ -146,18 +178,32 @@ async fn get_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result
     Ok(trace)
 }
 
-pub async fn get_trace_from_call(rpc_url: Url, tx_request: TransactionRequest) -> Result<DefaultFrame> {
+
+pub async fn get_trace_from_call(
+    rpc_url: Url,
+    tx_request: TransactionRequest,
+) -> Result<DefaultFrame> {
     let provider = ProviderBuilder::new().connect_anvil_with_wallet_and_config(|config| {
         config
             .fork(rpc_url)
             .arg("--steps-tracing")
             .arg("--auto-impersonate")
     })?;
-    let tx_hash = provider.send_transaction(tx_request).await?.watch().await?;
-    get_trace(&provider, tx_hash).await
+    let tx_receipt = provider
+        .send_transaction(tx_request)
+        .await?
+        .get_receipt()
+        .await?;
+    if !tx_receipt.status() {
+        bail!("transaction failed");
+    }
+    let tx_hash = tx_receipt.transaction_hash;
+    get_tx_trace(&provider, tx_hash).await
 }
 
-fn encode_state_updates_to_sol(state_updates: &[StateUpdate]) -> (Vec<StateUpdateType>, Vec<Bytes>) {
+fn encode_state_updates_to_sol(
+    state_updates: &[StateUpdate],
+) -> (Vec<StateUpdateType>, Vec<Bytes>) {
     let state_update_types: Vec<StateUpdateType> = state_updates
         .iter()
         .map(|state_update| match state_update {
@@ -175,13 +221,13 @@ fn encode_state_updates_to_sol(state_updates: &[StateUpdate]) -> (Vec<StateUpdat
         .iter()
         .map(|state_update| {
             Bytes::copy_from_slice(&match state_update {
-                StateUpdate::Store(x) => x.abi_encode(),
-                StateUpdate::Call(x) => x.abi_encode(),
-                StateUpdate::Log0(x) => x.abi_encode(),
-                StateUpdate::Log1(x) => x.abi_encode(),
-                StateUpdate::Log2(x) => x.abi_encode(),
-                StateUpdate::Log3(x) => x.abi_encode(),
-                StateUpdate::Log4(x) => x.abi_encode(),
+                StateUpdate::Store(x) => { x.abi_encode_sequence() },
+                StateUpdate::Call(x) => { x.abi_encode_sequence() },
+                StateUpdate::Log0(x) => { x.abi_encode_sequence() },
+                StateUpdate::Log1(x) => { x.abi_encode_sequence() },
+                StateUpdate::Log2(x) => { x.abi_encode_sequence() },
+                StateUpdate::Log3(x) => { x.abi_encode_sequence() },
+                StateUpdate::Log4(x) => { x.abi_encode_sequence() },
             })
         })
         .collect::<Vec<_>>();
@@ -201,27 +247,142 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
     Bytes::copy_from_slice(&encoded)
 }
 
-pub async fn call_to_encoded_state_updates(url: Url, tx_request: TransactionRequest) -> Result<Bytes> {
+pub async fn tx_to_encoded_state_updates(
+    provider: impl Provider,
+    tx_hash: FixedBytes<32>,
+) -> Result<Bytes> {
+    let trace = get_tx_trace(&provider, tx_hash).await?;
+    let state_updates = compute_state_updates(trace).await?;
+    Ok(encode_state_updates_to_abi(&state_updates))
+}
+pub async fn tx_request_to_encoded_state_updates(
+    url: Url,
+    tx_request: TransactionRequest,
+) -> Result<Bytes> {
     let trace = get_trace_from_call(url, tx_request).await?;
     let state_updates = compute_state_updates(trace).await?;
     Ok(encode_state_updates_to_abi(&state_updates))
 }
 
-pub async fn call_to_encoded_state_updates_with_gas_estimate<P>(url: Url, tx_request: TransactionRequest, gk: GasKillerDefault) -> Result<(Bytes, u64)> {
+pub async fn tx_to_encoded_state_updates_with_gas_estimate(
+    provider: impl Provider,
+    tx_hash: FixedBytes<32>,
+    gk: GasKillerDefault,
+) -> Result<(Bytes, u64)> {
+    let trace = get_tx_trace(&provider, tx_hash).await?;
+    let state_updates = compute_state_updates(trace).await?;
+    let gas_estimate = gk
+        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+        .await?;
+    Ok((encode_state_updates_to_abi(&state_updates), gas_estimate))
+}
+
+pub async fn invokes_smart_contract(
+    provider: impl Provider,
+    receipt: TransactionReceipt,
+) -> Result<bool> {
+    let to_address = receipt.to;
+    match to_address {
+        None => Ok(false),
+        Some(address) => {
+            let code = provider
+                .get_code_at(address)
+                .await?;
+            if code == Bytes::from_str("0x")? {
+                Ok(false)
+            } else {
+                Ok(true)
+            }
+        }
+    }
+}
+
+// computes state updates and estimates for each transaction one by one, nicer for CLI
+pub async fn gas_estimate_block(
+    provider: impl Provider,
+    block_id: BlockId,
+    gk: GasKillerDefault,
+) -> Result<()> {
+    let receipts = provider
+        .get_block_receipts(block_id)
+        .await?
+        .expect("block receipts retrieval failed");
+
+    for receipt in receipts {
+        let tx_hash = receipt.transaction_hash;
+        let gas_used = receipt.gas_used;
+        if let Ok(true) = invokes_smart_contract(&provider, receipt).await {
+            println!("getting trace for transaction {:x}", tx_hash);
+            let Ok(trace) = get_tx_trace(&provider, tx_hash).await else {
+                continue;
+            };
+            let Ok(state_updates) = compute_state_updates(trace).await else {
+                continue;
+            };
+            println!("computing gas killer estimate for transaction");
+            let gas_estimate = gk
+                .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+                .await?;
+            println!(
+                "actual gas used: {}, gas killer estimate: {}, percent savings: {:.2}",
+                gas_used,
+                gas_estimate,
+                ((gas_used - gas_estimate) * 100) as f64 / gas_used as f64
+            );
+        } else {
+            continue;
+        }
+    }
+    Ok(())
+}
+
+pub async fn gas_estimate_tx(
+    provider: impl Provider,
+    tx_hash: FixedBytes<32>,
+    gk: GasKillerDefault,
+) -> Result<()> {
+    let receipt = provider
+        .get_transaction_receipt(tx_hash)
+        .await?
+        .expect("fetch transaction receipt failed");
+    let gas_used = receipt.gas_used;
+    if let Ok(true) = invokes_smart_contract(&provider, receipt).await {
+        println!("analyzing transaction {:x}", tx_hash);
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+        let state_updates = compute_state_updates(trace).await?;
+        println!("computing gas killer estimate");
+        let gas_estimate = gk
+            .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+            .await?;
+        println!(
+            "actual gas used: {}, gas killer estimate: {}, percent savings: {:.2}",
+            gas_used,
+            gas_estimate,
+            ((gas_used - gas_estimate) * 100) as f64 / gas_used as f64
+        );
+    } else {
+        println!("transaction doesn't invoke a smart contract")
+    }
+    Ok(())
+}
+
+pub async fn call_to_encoded_state_updates_with_gas_estimate(
+    url: Url,
+    tx_request: TransactionRequest,
+    gk: GasKillerDefault,
+) -> Result<(Bytes, u64)> {
     let trace = get_trace_from_call(url, tx_request).await?;
     let state_updates = compute_state_updates(trace).await?;
-    let gas_estimate = gk.estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore).await?; 
+    let gas_estimate = gk
+        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+        .await?;
     Ok((encode_state_updates_to_abi(&state_updates), gas_estimate))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::{
-        hex,
-        primitives::{U256, address, b256, bytes},
-        signers::local::LocalSigner,
-    };
+    use alloy::primitives::{U256, address, b256, bytes};
     use constants::*;
     use sol_types::SimpleStorage;
 
@@ -229,22 +390,20 @@ mod tests {
     async fn test_compute_state_updates_set() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
-        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
-        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
-        let bytes = hex::decode(private_key).expect("Invalid private key hex");
-        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-        let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
-        let trace = get_trace(&provider, tx_hash).await?;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
         let state_updates = compute_state_updates(trace).await?;
 
         let gk = GasKillerDefault::new().await?;
-        let gas_estimate = gk.estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore).await?;
-        assert_eq!(gas_estimate, 32958);
+        let gas_estimate = gk
+            .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+            .await?;
+        assert_eq!(gas_estimate, 32549);
 
         assert_eq!(state_updates.len(), 2);
         assert!(matches!(state_updates[0], StateUpdate::Store(_)));
@@ -280,17 +439,13 @@ mod tests {
     async fn test_compute_state_updates_deposit() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
-        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
-        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
-        let bytes = hex::decode(private_key).expect("Invalid private key hex");
-        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-        let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_DEPOSIT_TX_HASH;
-        let trace = get_trace(&provider, tx_hash).await?;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
         let state_updates = compute_state_updates(trace).await?;
 
         assert_eq!(state_updates.len(), 2);
@@ -328,20 +483,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_compute_state_updates_delegatecall() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
+            .parse()?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
+
+        let tx_hash = DELEGATECALL_CONTRACT_MAIN_RUN_TX_HASH;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+        let state_updates = compute_state_updates(trace).await?;
+
+        assert_eq!(state_updates.len(), 4);
+        let StateUpdate::Store(IStateUpdateTypes::Store { slot, value }) = &state_updates[0] else {
+            bail!("Expected Store, got {:?}", state_updates[0]);
+        };
+        assert_eq!(
+            slot,
+            &b256!("0x0000000000000000000000000000000000000000000000000000000000000003")
+        );
+        assert_eq!(
+            value,
+            &b256!("0x0000000000000000000000000000000000000000000000000000000000000001")
+        );
+
+        let StateUpdate::Call(IStateUpdateTypes::Call {
+            target,
+            value,
+            callargs,
+        }) = &state_updates[1]
+        else {
+            bail!("Expected Call, got {:?}", state_updates[1]);
+        };
+        assert_eq!(target, &DELEGATE_CONTRACT_A_ADDRESS);
+        assert_eq!(value, &U256::from(0));
+        assert_eq!(callargs, &bytes!("0xaea01afc"));
+
+        let StateUpdate::Store(IStateUpdateTypes::Store { slot, value }) = &state_updates[2] else {
+            bail!("Expected Store, got {:?}", state_updates[2]);
+        };
+        assert_eq!(
+            slot,
+            &b256!("0x0000000000000000000000000000000000000000000000000000000000000002")
+        );
+        assert_eq!(
+            value,
+            &b256!("0x0000000000000000000000000000000000000000000000000de0b6b3a7640000")
+        ); // 1 ether (use cast to-dec)
+
+        let StateUpdate::Store(IStateUpdateTypes::Store { slot, value }) = &state_updates[3] else {
+            bail!("Expected Store, got {:?}", state_updates[3]);
+        };
+        assert_eq!(
+            slot,
+            &b256!("0x0000000000000000000000000000000000000000000000000000000000000002")
+        );
+        assert_eq!(
+            value,
+            &b256!("0x00000000000000000000000000000000000000000000000029a2241af62c0000")
+        ); // 3 ether (use cast to-dec)
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_compute_state_updates_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
-        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
-        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
-        let bytes = hex::decode(private_key).expect("Invalid private key hex");
-        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-        let provider = ProviderBuilder::new().wallet(signer).connect_http(rpc_url);
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_CALL_EXTERNAL_TX_HASH;
-        let trace = get_trace(&provider, tx_hash).await?;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
         let state_updates = compute_state_updates(trace).await?;
 
         assert_eq!(state_updates.len(), 1);
@@ -364,18 +580,14 @@ mod tests {
     async fn test_compute_state_update_simulate_call() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url: Url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
-        let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
-        let private_key = private_key.strip_prefix("0x").unwrap_or(&private_key);
-        let bytes = hex::decode(private_key).expect("Invalid private key hex");
-        let signer = LocalSigner::from_slice(&bytes).expect("Invalid private key");
-        let provider = ProviderBuilder::new()
-            .wallet(signer)
-            .connect_http(rpc_url.clone());
 
-        let simple_storage = SimpleStorage::deploy(&provider).await?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+
+        let simple_storage =
+            SimpleStorage::SimpleStorageInstance::new(SIMPLE_STORAGE_ADDRESS, &provider);
         let tx_request = simple_storage.set(U256::from(1)).into_transaction_request();
 
         let trace = get_trace_from_call(rpc_url, tx_request).await?;
