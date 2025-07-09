@@ -6,7 +6,8 @@ pub(crate) type Opcode = String;
 
 #[derive(Serialize)]
 pub struct GasKillerReport {
-    pub hash: FixedBytes<32>,
+    pub tx_hash: FixedBytes<32>,
+    pub block_hash: FixedBytes<32>,
     pub gas_used: u128,
     pub gas_cost: u128,
     pub gaskiller_gas_estimate: u128,
@@ -20,7 +21,13 @@ pub struct GasKillerReport {
 impl GasKillerReport {
     pub fn report_error(receipt: &TransactionReceipt, e: &anyhow::Error) -> Self {
         GasKillerReport {
-            hash: receipt.transaction_hash,
+            tx_hash: receipt.transaction_hash,
+            block_hash: receipt.block_hash.unwrap_or_else(|| {
+                panic!(
+                    "couldn't retrieve block hash for tx {}",
+                    receipt.transaction_hash
+                )
+            }),
             gas_used: receipt.gas_used.into(),
             gas_cost: 0,
             gaskiller_gas_estimate: 0,
@@ -28,12 +35,18 @@ impl GasKillerReport {
             percent_savings: 0.0,
             function_selector: FixedBytes::default(),
             skipped_opcodes: "".to_string(),
-            error_log: Some(format!("{:?}", e)),
+            error_log: Some(format!("{e:?}")),
         }
     }
     pub fn from(receipt: &TransactionReceipt, details: ReportDetails) -> Self {
         GasKillerReport {
-            hash: receipt.transaction_hash,
+            tx_hash: receipt.transaction_hash,
+            block_hash: receipt.block_hash.unwrap_or_else(|| {
+                panic!(
+                    "couldn't retrieve block hash for tx {}",
+                    receipt.transaction_hash
+                )
+            }),
             gas_used: receipt.gas_used.into(),
             gas_cost: details.gas_cost,
             gaskiller_gas_estimate: details.gaskiller_gas_estimate,

@@ -3,12 +3,14 @@ use alloy_eips::{BlockId, BlockNumberOrTag, RpcBlockHash};
 use alloy_rpc_types::TransactionRequest;
 use anyhow::Result;
 use colored::Colorize;
-use csv::Writer;
+use csv::WriterBuilder;
 use gas_analyzer_rs::{
     call_to_encoded_state_updates_with_gas_estimate, gas_estimate_block, gas_estimate_tx,
     gk::GasKillerDefault,
 };
-use std::{env, fs};
+use std::fs::OpenOptions;
+use std::path::Path;
+use std::{env, path};
 use std::{fs::File, io::Read};
 use url::Url;
 
@@ -46,7 +48,7 @@ async fn main() {
 
     let result = execute_command(command).await;
     if let Err(e) = result {
-        println!("{:?}", e);
+        println!("{e:?}");
     }
 }
 
@@ -79,10 +81,14 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
             let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
             println!("generating gaskiller reports...");
             let (reports, block_hash) = gas_estimate_block(provider, identifier, gk).await?;
-            fs::create_dir_all("reports")?;
-
-            let _ = File::create(format!("reports/{block_hash}.csv"))?;
-            let mut writer = Writer::from_path(format!("reports/{block_hash}.csv"))?;
+            let path = Path::new("reports.csv");
+            let exists = path::Path::exists(path);
+            let file = OpenOptions::new()
+                .create(!exists)
+                .append(true)
+                .open(path)
+                .unwrap();
+            let mut writer = WriterBuilder::new().has_headers(!exists).from_writer(file);
             for report in reports {
                 writer.serialize(report)?;
                 writer.flush()?;
@@ -96,13 +102,18 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
                 .expect("failed to decode transaction hash");
 
             let report = gas_estimate_tx(provider, bytes.into(), gk).await?;
-            fs::create_dir_all("reports")?;
-            let _ = File::create(format!("reports/{hash}.csv"))?;
-            let mut writer = Writer::from_path(format!("reports/{hash}.csv"))?;
 
+            let path = Path::new("reports.csv");
+            let exists = path::Path::exists(path);
+            let file = OpenOptions::new()
+                .create(!exists)
+                .append(true)
+                .open(path)
+                .unwrap();
+            let mut writer = WriterBuilder::new().has_headers(!exists).from_writer(file);
             writer.serialize(report)?;
             writer.flush()?;
-            println!("successfully wrote data to reports/{hash}.csv");
+            println!("successfully wrote data to reports.csv");
         }
 
         Some(Commands::Request(file)) => {

@@ -293,10 +293,10 @@ pub async fn gas_estimate_block(
         let smart_contract_tx = invokes_smart_contract(&provider, &receipt).await?;
         let tx_hash = receipt.transaction_hash;
         if !smart_contract_tx {
-            println!("tx 0x{:x} does not call a smart contract", tx_hash);
+            println!("tx 0x{tx_hash:x} does not call a smart contract");
             continue;
         }
-        println!("getting report for 0x{:x}", tx_hash);
+        println!("getting report for 0x{tx_hash:x}");
         let details = gaskiller_reporter(&provider, tx_hash, &gk, &receipt).await;
         if let Err(e) = &details {
             reports.push(GasKillerReport::report_error(&receipt, e));
@@ -408,9 +408,8 @@ mod tests {
             hex::const_decode_to_array(hash.as_bytes()).expect("failed to decode transaction hash");
         let gk = GasKillerDefault::new().await?;
         let report = gas_estimate_tx(provider, bytes.into(), gk).await?;
-        fs::create_dir_all("reports")?;
-        let _ = File::create("reports/test.csv")?;
-        let mut writer = Writer::from_path("reports/test.csv")?;
+        let _ = File::create("test.csv")?;
+        let mut writer = Writer::from_path("test.csv")?;
 
         writer.serialize(report)?;
         writer.flush()?;
