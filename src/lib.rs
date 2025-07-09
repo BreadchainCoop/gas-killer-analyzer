@@ -419,8 +419,8 @@ mod tests {
     async fn test_compute_state_updates_set() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -468,8 +468,8 @@ mod tests {
     async fn test_compute_state_updates_deposit() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -515,8 +515,8 @@ mod tests {
     async fn test_compute_state_updates_delegatecall() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -580,8 +580,8 @@ mod tests {
     async fn test_compute_state_updates_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -609,8 +609,8 @@ mod tests {
     async fn test_compute_state_update_simulate_call() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
+        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
             .parse()?;
 
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
