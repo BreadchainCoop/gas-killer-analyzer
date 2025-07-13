@@ -81,7 +81,9 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
             let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
             println!("generating gaskiller reports...");
             let (reports, block_hash) = gas_estimate_block(provider, identifier, gk).await?;
-            let path = Path::new("reports.csv");
+            let output_file = std::env::var("OUTPUT_FILE")
+        .expect("OUTPUT_FILE must be set");
+            let path = Path::new(output_file.as_str());
             let exists = path::Path::exists(path);
             let file = OpenOptions::new()
                 .create(!exists)
