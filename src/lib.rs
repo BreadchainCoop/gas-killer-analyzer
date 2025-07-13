@@ -315,7 +315,7 @@ pub async fn gas_estimate_tx(
     let receipt = provider
         .get_transaction_receipt(tx_hash)
         .await?
-        .ok_or_else(|| anyhow!("could not get receipt for tx {}", tx_hash))?;
+        .ok_or_else(|| anyhow!("could not get receipt for tx 0x{}", tx_hash))?;
     let smart_contract_tx = invokes_smart_contract(&provider, &receipt).await?;
 
     if !smart_contract_tx {
@@ -338,7 +338,7 @@ pub async fn gaskiller_reporter(
     let transaction = provider
         .get_transaction_by_hash(tx_hash)
         .await?
-        .ok_or_else(|| anyhow!("could not get receipt for tx {}", tx_hash))?;
+        .ok_or_else(|| anyhow!("could not get receipt for tx 0x{}", tx_hash))?;
     let trace = get_tx_trace(&provider, tx_hash).await?;
     let (state_updates, opcodes) = compute_state_updates(trace).await?;
     let gas_used = receipt.gas_used as u128;
@@ -351,7 +351,7 @@ pub async fn gaskiller_reporter(
     let gaskiller_estimated_gas_cost: u128 = effective_gas_price * gaskiller_gas_estimate as u128;
     let function_selector = *transaction
         .function_selector()
-        .ok_or_else(|| anyhow!("could not get function selector for tx {}", tx_hash))?;
+        .ok_or_else(|| anyhow!("could not get function selector for tx 0x{}", tx_hash))?;
     Ok(ReportDetails {
         gas_cost,
         gaskiller_gas_estimate: gaskiller_gas_estimate.into(),
