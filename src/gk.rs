@@ -13,7 +13,7 @@ use alloy::{
     signers::local::PrivateKeySigner,
     sol,
 };
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 sol!(
     #[sol(rpc)]

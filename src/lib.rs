@@ -2,8 +2,10 @@
 mod constants;
 pub mod gk;
 mod sol_types;
+pub mod structs;
 
-use std::str::FromStr;
+use std::{collections::HashSet, str::FromStr};
+use structs::{GasKillerReport, Opcode, ReportDetails};
 
 use alloy::{
     primitives::{Address, Bytes, FixedBytes},
@@ -18,6 +20,7 @@ use alloy::{
     sol_types::SolValue,
 };
 use alloy_eips::eip1898::BlockId;
+use alloy_rpc_types::TransactionTrait;
 use anyhow::{Result, anyhow, bail};
 use gk::{GasKillerDefault, WarmSlotsRule};
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
@@ -47,7 +50,7 @@ fn parse_trace_memory(memory: Vec<String>) -> Vec<u8> {
 fn append_to_state_updates(
     state_updates: &mut Vec<StateUpdate>,
     struct_log: StructLog,
-) -> Result<()> {
+) -> Result<Option<Opcode>> {
     let mut stack = struct_log.stack.expect("stack is empty");
     stack.reverse();
     let memory = match struct_log.memory {
@@ -56,12 +59,18 @@ fn append_to_state_updates(
             "CALL" | "LOG0" | "LOG1" | "LOG2" | "LOG3" | "LOG4" if struct_log.depth == 1 => {
                 bail!("There is no memory for {:?} in depth 1", struct_log.op)
             }
-            _ => return Ok(()),
+            _ => return Ok(None),
         },
     };
     match struct_log.op.as_str() {
-        "DELEGATECALL" | "CALLCODE" | "CREATE" | "CREATE2" | "SELFDESTRUCT" => {
-            bail!("Opcode not allowed: {:?}", struct_log.op)
+        "CREATE" | "CREATE2" | "SELFDESTRUCT" => {
+            return Ok(Some(struct_log.op));
+        }
+        "DELEGATECALL" | "CALLCODE" => {
+            bail!(
+                "Calling opcode {:?}, this shouldn't even happen!",
+                struct_log.op
+            );
         }
         "SSTORE" => state_updates.push(StateUpdate::Store(IStateUpdateTypes::Store {
             slot: stack[0].into(),
@@ -129,13 +138,14 @@ fn append_to_state_updates(
         }
         _ => {}
     }
-    Ok(())
+    Ok(None)
 }
 
-async fn compute_state_updates(trace: DefaultFrame) -> Result<Vec<StateUpdate>> {
+async fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpdate>, HashSet<Opcode>)> {
     let mut state_updates: Vec<StateUpdate> = Vec::new();
     // depth for which we care about state updates happening in
     let mut target_depth = 1;
+    let mut skipped_opcodes = HashSet::new();
     for struct_log in trace.struct_logs {
         // Whenever stepping up (leaving a CALL/CALLCODE/DELEGATECALL) reset the target depth
         if struct_log.depth < target_depth {
@@ -145,12 +155,12 @@ async fn compute_state_updates(trace: DefaultFrame) -> Result<Vec<StateUpdate>> 
             // else, try to add the state update
             if struct_log.op.as_str() == "DELEGATECALL" || struct_log.op.as_str() == "CALLCODE" {
                 target_depth = struct_log.depth + 1;
-            } else {
-                append_to_state_updates(&mut state_updates, struct_log)?;
+            } else if let Some(opcode) = append_to_state_updates(&mut state_updates, struct_log)? {
+                skipped_opcodes.insert(opcode);
             }
         }
     }
-    Ok(state_updates)
+    Ok((state_updates, skipped_opcodes))
 }
 
 async fn get_tx_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
@@ -177,7 +187,6 @@ async fn get_tx_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Res
     };
     Ok(trace)
 }
-
 
 pub async fn get_trace_from_call(
     rpc_url: Url,
@@ -221,13 +230,13 @@ fn encode_state_updates_to_sol(
         .iter()
         .map(|state_update| {
             Bytes::copy_from_slice(&match state_update {
-                StateUpdate::Store(x) => { x.abi_encode_sequence() },
-                StateUpdate::Call(x) => { x.abi_encode_sequence() },
-                StateUpdate::Log0(x) => { x.abi_encode_sequence() },
-                StateUpdate::Log1(x) => { x.abi_encode_sequence() },
-                StateUpdate::Log2(x) => { x.abi_encode_sequence() },
-                StateUpdate::Log3(x) => { x.abi_encode_sequence() },
-                StateUpdate::Log4(x) => { x.abi_encode_sequence() },
+                StateUpdate::Store(x) => x.abi_encode_sequence(),
+                StateUpdate::Call(x) => x.abi_encode_sequence(),
+                StateUpdate::Log0(x) => x.abi_encode_sequence(),
+                StateUpdate::Log1(x) => x.abi_encode_sequence(),
+                StateUpdate::Log2(x) => x.abi_encode_sequence(),
+                StateUpdate::Log3(x) => x.abi_encode_sequence(),
+                StateUpdate::Log4(x) => x.abi_encode_sequence(),
             })
         })
         .collect::<Vec<_>>();
@@ -247,47 +256,15 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
     Bytes::copy_from_slice(&encoded)
 }
 
-pub async fn tx_to_encoded_state_updates(
-    provider: impl Provider,
-    tx_hash: FixedBytes<32>,
-) -> Result<Bytes> {
-    let trace = get_tx_trace(&provider, tx_hash).await?;
-    let state_updates = compute_state_updates(trace).await?;
-    Ok(encode_state_updates_to_abi(&state_updates))
-}
-pub async fn tx_request_to_encoded_state_updates(
-    url: Url,
-    tx_request: TransactionRequest,
-) -> Result<Bytes> {
-    let trace = get_trace_from_call(url, tx_request).await?;
-    let state_updates = compute_state_updates(trace).await?;
-    Ok(encode_state_updates_to_abi(&state_updates))
-}
-
-pub async fn tx_to_encoded_state_updates_with_gas_estimate(
-    provider: impl Provider,
-    tx_hash: FixedBytes<32>,
-    gk: GasKillerDefault,
-) -> Result<(Bytes, u64)> {
-    let trace = get_tx_trace(&provider, tx_hash).await?;
-    let state_updates = compute_state_updates(trace).await?;
-    let gas_estimate = gk
-        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
-        .await?;
-    Ok((encode_state_updates_to_abi(&state_updates), gas_estimate))
-}
-
 pub async fn invokes_smart_contract(
     provider: impl Provider,
-    receipt: TransactionReceipt,
+    receipt: &TransactionReceipt,
 ) -> Result<bool> {
     let to_address = receipt.to;
     match to_address {
         None => Ok(false),
         Some(address) => {
-            let code = provider
-                .get_code_at(address)
-                .await?;
+            let code = provider.get_code_at(address).await?;
             if code == Bytes::from_str("0x")? {
                 Ok(false)
             } else {
@@ -302,102 +279,154 @@ pub async fn gas_estimate_block(
     provider: impl Provider,
     block_id: BlockId,
     gk: GasKillerDefault,
-) -> Result<()> {
+) -> Result<(Vec<GasKillerReport>, FixedBytes<32>)> {
     let receipts = provider
         .get_block_receipts(block_id)
         .await?
         .expect("block receipts retrieval failed");
-
+    let block_hash = receipts[0]
+        .block_hash
+        .expect("couldn't find block hash in receipt");
+    println!("got {} receipts for block {}", receipts.len(), block_hash);
+    let mut reports = Vec::new();
     for receipt in receipts {
+        let smart_contract_tx = invokes_smart_contract(&provider, &receipt).await?;
         let tx_hash = receipt.transaction_hash;
-        let gas_used = receipt.gas_used;
-        if let Ok(true) = invokes_smart_contract(&provider, receipt).await {
-            println!("getting trace for transaction {:x}", tx_hash);
-            let Ok(trace) = get_tx_trace(&provider, tx_hash).await else {
-                continue;
-            };
-            let Ok(state_updates) = compute_state_updates(trace).await else {
-                continue;
-            };
-            println!("computing gas killer estimate for transaction");
-            let gas_estimate = gk
-                .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
-                .await?;
-            println!(
-                "actual gas used: {}, gas killer estimate: {}, percent savings: {:.2}",
-                gas_used,
-                gas_estimate,
-                ((gas_used - gas_estimate) * 100) as f64 / gas_used as f64
-            );
-        } else {
+        if !smart_contract_tx {
+            println!("tx 0x{tx_hash:x} does not call a smart contract");
             continue;
         }
+        println!("getting report for 0x{tx_hash:x}");
+        let details = gaskiller_reporter(&provider, tx_hash, &gk, &receipt).await;
+        if let Err(e) = &details {
+            reports.push(GasKillerReport::report_error(&receipt, e));
+            continue;
+        }
+        reports.push(GasKillerReport::from(&receipt, details.unwrap()));
     }
-    Ok(())
+    Ok((reports, block_hash))
 }
 
 pub async fn gas_estimate_tx(
     provider: impl Provider,
     tx_hash: FixedBytes<32>,
     gk: GasKillerDefault,
-) -> Result<()> {
+) -> Result<GasKillerReport> {
     let receipt = provider
         .get_transaction_receipt(tx_hash)
         .await?
-        .expect("fetch transaction receipt failed");
-    let gas_used = receipt.gas_used;
-    if let Ok(true) = invokes_smart_contract(&provider, receipt).await {
-        println!("analyzing transaction {:x}", tx_hash);
-        let trace = get_tx_trace(&provider, tx_hash).await?;
-        let state_updates = compute_state_updates(trace).await?;
-        println!("computing gas killer estimate");
-        let gas_estimate = gk
-            .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
-            .await?;
-        println!(
-            "actual gas used: {}, gas killer estimate: {}, percent savings: {:.2}",
-            gas_used,
-            gas_estimate,
-            ((gas_used - gas_estimate) * 100) as f64 / gas_used as f64
-        );
-    } else {
-        println!("transaction doesn't invoke a smart contract")
+        .ok_or_else(|| anyhow!("could not get receipt for tx 0x{}", tx_hash))?;
+    let smart_contract_tx = invokes_smart_contract(&provider, &receipt).await?;
+
+    if !smart_contract_tx {
+        bail!("Transaction does not call a smart contract");
     }
-    Ok(())
+    let details = gaskiller_reporter(provider, tx_hash, &gk, &receipt).await;
+    if let Err(e) = details {
+        return Ok(GasKillerReport::report_error(&receipt, &e));
+    }
+
+    Ok(GasKillerReport::from(&receipt, details.unwrap()))
+}
+
+pub async fn gaskiller_reporter(
+    provider: impl Provider,
+    tx_hash: FixedBytes<32>,
+    gk: &GasKillerDefault,
+    receipt: &TransactionReceipt,
+) -> Result<ReportDetails> {
+    let transaction = provider
+        .get_transaction_by_hash(tx_hash)
+        .await?
+        .ok_or_else(|| anyhow!("could not get receipt for tx 0x{}", tx_hash))?;
+    let trace = get_tx_trace(&provider, tx_hash).await?;
+    let (state_updates, opcodes) = compute_state_updates(trace).await?;
+    let gas_used = receipt.gas_used as u128;
+    let effective_gas_price = receipt.effective_gas_price;
+    let gas_cost = effective_gas_price * gas_used;
+    let skipped_opcodes = opcodes.into_iter().collect::<Vec<_>>().join(", ");
+    let gaskiller_gas_estimate = gk
+        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+        .await?;
+    let gaskiller_estimated_gas_cost: u128 = effective_gas_price * gaskiller_gas_estimate as u128;
+    let function_selector = *transaction
+        .function_selector()
+        .ok_or_else(|| anyhow!("could not get function selector for tx 0x{}", tx_hash))?;
+    Ok(ReportDetails {
+        gas_cost,
+        gaskiller_gas_estimate: gaskiller_gas_estimate.into(),
+        gaskiller_estimated_gas_cost,
+        percent_savings: ((gas_used.saturating_sub(gaskiller_gas_estimate as u128)) * 100u128)
+            as f64
+            / gas_used as f64,
+        function_selector,
+        skipped_opcodes,
+    })
 }
 
 pub async fn call_to_encoded_state_updates_with_gas_estimate(
     url: Url,
     tx_request: TransactionRequest,
     gk: GasKillerDefault,
-) -> Result<(Bytes, u64)> {
+) -> Result<(Bytes, u64, HashSet<Opcode>)> {
     let trace = get_trace_from_call(url, tx_request).await?;
-    let state_updates = compute_state_updates(trace).await?;
+    let (state_updates, skipped_opcodes) = compute_state_updates(trace).await?;
     let gas_estimate = gk
         .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
         .await?;
-    Ok((encode_state_updates_to_abi(&state_updates), gas_estimate))
+    Ok((
+        encode_state_updates_to_abi(&state_updates),
+        gas_estimate,
+        skipped_opcodes,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+
     use super::*;
-    use alloy::primitives::{U256, address, b256, bytes};
+    use alloy::{
+        hex,
+        primitives::{U256, address, b256, bytes},
+    };
     use constants::*;
+    use csv::Writer;
     use sol_types::SimpleStorage;
 
     #[tokio::test]
-    async fn test_compute_state_updates_set() -> Result<()> {
+    async fn test_csv_writer() -> Result<()> {
         dotenv::dotenv().ok();
 
         let rpc_url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
+
+        let hash = "0x0df13f90b94773887709ce26216928c952e2d7f6d5af44198504ac6899fc5165";
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
+        let bytes: [u8; 32] =
+            hex::const_decode_to_array(hash.as_bytes()).expect("failed to decode transaction hash");
+        let gk = GasKillerDefault::new().await?;
+        let report = gas_estimate_tx(provider, bytes.into(), gk).await?;
+        let _ = File::create("test.csv")?;
+        let mut writer = Writer::from_path("test.csv")?;
+
+        writer.serialize(report)?;
+        writer.flush()?;
+        Ok(())
+    }
+    #[tokio::test]
+    async fn test_compute_state_updates_set() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
+            .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
-        let state_updates = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace).await?;
 
         let gk = GasKillerDefault::new().await?;
         let gas_estimate = gk
@@ -439,14 +468,14 @@ mod tests {
     async fn test_compute_state_updates_deposit() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_DEPOSIT_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
-        let state_updates = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace).await?;
 
         assert_eq!(state_updates.len(), 2);
         assert!(matches!(state_updates[0], StateUpdate::Store(_)));
@@ -486,14 +515,14 @@ mod tests {
     async fn test_compute_state_updates_delegatecall() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = DELEGATECALL_CONTRACT_MAIN_RUN_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
-        let state_updates = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace).await?;
 
         assert_eq!(state_updates.len(), 4);
         let StateUpdate::Store(IStateUpdateTypes::Store { slot, value }) = &state_updates[0] else {
@@ -551,14 +580,14 @@ mod tests {
     async fn test_compute_state_updates_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_CALL_EXTERNAL_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
-        let state_updates = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace).await?;
 
         assert_eq!(state_updates.len(), 1);
         assert!(matches!(state_updates[0], StateUpdate::Call(_)));
@@ -580,8 +609,8 @@ mod tests {
     async fn test_compute_state_update_simulate_call() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
+        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
             .parse()?;
 
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
@@ -591,7 +620,7 @@ mod tests {
         let tx_request = simple_storage.set(U256::from(1)).into_transaction_request();
 
         let trace = get_trace_from_call(rpc_url, tx_request).await?;
-        let state_updates = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace).await?;
 
         assert_eq!(state_updates.len(), 2);
         assert!(matches!(state_updates[0], StateUpdate::Store(_)));

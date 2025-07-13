@@ -38,3 +38,6 @@ For a transaction request:
 ```bash
 cargo run -- r path/to/file.json
 ```
+
+
+The analysis report is written to `reports.csv`.
