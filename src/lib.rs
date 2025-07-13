@@ -383,7 +383,7 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
 
 #[cfg(test)]
 mod tests {
-    use std::fs::{self, File};
+    use std::fs::File;
 
     use super::*;
     use alloy::{
