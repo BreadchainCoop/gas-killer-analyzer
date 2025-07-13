@@ -40,4 +40,4 @@ cargo run -- r path/to/file.json
 ```
 
 
-The analysis report is written to `reports.csv`.
+The analysis report is written to the `OUTPUT_FILE` env variable.
