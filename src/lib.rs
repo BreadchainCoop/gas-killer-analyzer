@@ -8,7 +8,7 @@ use std::{collections::HashSet, str::FromStr};
 use structs::{GasKillerReport, Opcode, ReportDetails};
 
 use alloy::{
-    primitives::{Address, Bytes, FixedBytes},
+    primitives::{Address, Bytes, FixedBytes, TxKind},
     providers::{Provider, ProviderBuilder, ext::DebugApi},
     rpc::types::{
         TransactionReceipt,
@@ -346,7 +346,13 @@ pub async fn gaskiller_reporter(
     let gas_cost = effective_gas_price * gas_used;
     let skipped_opcodes = opcodes.into_iter().collect::<Vec<_>>().join(", ");
     let gaskiller_gas_estimate = gk
-        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+        .estimate_state_changes_gas(
+            receipt
+                .to
+                .ok_or_else(|| anyhow!("receipt does not have to address"))?,
+            &state_updates,
+            WarmSlotsRule::AllStore,
+        )
         .await?;
     let gaskiller_estimated_gas_cost: u128 = effective_gas_price * gaskiller_gas_estimate as u128;
     let function_selector = *transaction
@@ -369,10 +375,17 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
     tx_request: TransactionRequest,
     gk: GasKillerDefault,
 ) -> Result<(Bytes, u64, HashSet<Opcode>)> {
+    let contract_address = tx_request
+        .to
+        .and_then(|x| match x {
+            TxKind::Call(address) => Some(address),
+            TxKind::Create => None,
+        })
+        .ok_or_else(|| anyhow!("receipt does not have to address"))?;
     let trace = get_trace_from_call(url, tx_request).await?;
     let (state_updates, skipped_opcodes) = compute_state_updates(trace).await?;
     let gas_estimate = gk
-        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+        .estimate_state_changes_gas(contract_address, &state_updates, WarmSlotsRule::AllStore)
         .await?;
     Ok((
         encode_state_updates_to_abi(&state_updates),
@@ -415,8 +428,9 @@ mod tests {
         writer.flush()?;
         Ok(())
     }
+
     #[tokio::test]
-    async fn test_compute_state_updates_set() -> Result<()> {
+    async fn test_estimate_state_changes_gas_set() -> Result<()> {
         dotenv::dotenv().ok();
 
         let rpc_url = std::env::var("TESTNET_RPC_URL")
@@ -430,9 +444,51 @@ mod tests {
 
         let gk = GasKillerDefault::new().await?;
         let gas_estimate = gk
-            .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+            .estimate_state_changes_gas(SIMPLE_STORAGE_ADDRESS, &state_updates, WarmSlotsRule::AllStore)
             .await?;
-        assert_eq!(gas_estimate, 32549);
+        assert_eq!(gas_estimate, 24761);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_estimate_state_changes_gas_access_control() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
+            .parse()?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
+
+        let tx_hash = ACCESS_CONTROL_MAIN_RUN_TX_HASH;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+        let (state_updates, _) = compute_state_updates(trace).await?;
+
+        println!("state_updates: {:?}", state_updates);
+
+        let gk = GasKillerDefault::new().await?;
+        let gas_estimate = gk
+            .estimate_state_changes_gas(
+                ACCESS_CONTROL_MAIN_ADDRESS,
+                &state_updates,
+                WarmSlotsRule::AllStore,
+            )
+            .await?;
+        assert_eq!(gas_estimate, 24105);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_compute_state_updates_set() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
+            .parse()?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
+
+        let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+        let (state_updates, _) = compute_state_updates(trace).await?;
 
         assert_eq!(state_updates.len(), 2);
         assert!(matches!(state_updates[0], StateUpdate::Store(_)));
