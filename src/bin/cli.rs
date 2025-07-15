@@ -80,10 +80,12 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
 
             let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
             println!("generating gaskiller reports...");
+
             let (reports, _) = gas_estimate_block(provider, identifier, gk).await?;
             let output_file = std::env::var("OUTPUT_FILE")
         .expect("OUTPUT_FILE must be set");
             let path = Path::new(output_file.as_str());
+
             let exists = path::Path::exists(path);
             let file = OpenOptions::new()
                 .create(!exists)
@@ -95,8 +97,8 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
                 writer.serialize(report)?;
                 writer.flush()?;
             }
-
             println!("successfully wrote data to {output_file}");
+
         }
         Some(Commands::Transaction(hash)) => {
             let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
@@ -105,9 +107,11 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
 
             let report = gas_estimate_tx(provider, bytes.into(), gk).await?;
 
+
               let output_file = std::env::var("OUTPUT_FILE")
                 .expect("OUTPUT_FILE must be set");
             let path = Path::new(output_file.as_str());
+
             let exists = path::Path::exists(path);
             let file = OpenOptions::new()
                 .create(!exists)
