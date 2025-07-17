@@ -4,15 +4,16 @@ use alloy::{
     node_bindings::{Anvil, AnvilInstance},
     primitives::{Address, Bytes},
     providers::{
+        Identity, ProviderBuilder, RootProvider,
         fillers::{
             BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller,
             WalletFiller,
-        }, Identity, ProviderBuilder, RootProvider
+        },
     },
     signers::local::PrivateKeySigner,
     sol,
 };
-use alloy_provider::{ext::AnvilApi, Provider};
+use alloy_provider::{Provider, ext::AnvilApi};
 use anyhow::{Result, bail};
 use url::Url;
 
@@ -38,7 +39,7 @@ pub type GasKillerDefault = GasKiller<ConnectHTTPDefaultProvider>;
 pub struct GasKiller<P> {
     _anvil: AnvilInstance,
     provider: P,
-    code: Bytes
+    code: Bytes,
 }
 
 impl GasKiller<ConnectHTTPDefaultProvider> {
@@ -58,7 +59,7 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
         Ok(Self {
             _anvil: anvil,
             provider,
-            code
+            code,
         })
     }
 
@@ -75,13 +76,18 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
 
         let (types, args) = crate::encode_state_updates_to_sol(state_updates);
         let types = types.iter().map(|x| *x as u8).collect::<Vec<_>>();
-        let tx = target_contract.runStateUpdatesCall(types, args).send().await?;
+        let tx = target_contract
+            .runStateUpdatesCall(types, args)
+            .send()
+            .await?;
         let receipt = tx.get_receipt().await?;
         if !receipt.status() {
             bail!("Transaction failed");
         }
 
-        self.provider.anvil_set_code(contract_address, original_code).await?;
+        self.provider
+            .anvil_set_code(contract_address, original_code)
+            .await?;
         Ok(receipt.gas_used)
     }
 }

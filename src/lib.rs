@@ -490,7 +490,7 @@ mod tests {
         // Check that the error contains a certain substring
         let error_msg = match gas_estimate {
             Ok(_) => bail!("Expected error, got Ok"),
-            Err(e) => e.to_string()
+            Err(e) => e.to_string(),
         };
 
         // cast sig "RevertingContext(address,bytes)"
