@@ -57,7 +57,7 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
         .expect("RPC_URL must be set")
         .parse()
         .expect("unable to parse rpc url");
-    let gk = GasKillerDefault::new()
+    let gk = GasKillerDefault::new(rpc_url.clone())
         .await
         .expect("unable to initialize GasKiller");
     match cmd {
