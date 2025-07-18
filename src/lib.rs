@@ -422,7 +422,7 @@ mod tests {
         let bytes: [u8; 32] =
             hex::const_decode_to_array(hash.as_bytes()).expect("failed to decode transaction hash");
         let gk = GasKillerDefault::new(rpc_url).await?;
-        let report = gas_estimate_tx(provider, bytes.into(), gk).await?;
+        let report = gas_estimate_tx(provider, bytes.into(), &gk).await?;
 
         let _ = File::create("test.csv")?;
         let mut writer = Writer::from_path("test.csv")?;
