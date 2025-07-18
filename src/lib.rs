@@ -8,7 +8,7 @@ use std::{collections::HashSet, str::FromStr};
 use structs::{GasKillerReport, Opcode, ReportDetails};
 
 use alloy::{
-    primitives::{Address, Bytes, FixedBytes},
+    primitives::{Address, Bytes, FixedBytes, TxKind},
     providers::{Provider, ProviderBuilder, ext::DebugApi},
     rpc::types::{
         TransactionReceipt,
@@ -22,7 +22,7 @@ use alloy::{
 use alloy_eips::eip1898::BlockId;
 use alloy_rpc_types::TransactionTrait;
 use anyhow::{Result, anyhow, bail};
-use gk::{GasKillerDefault, WarmSlotsRule};
+use gk::GasKillerDefault;
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
 use url::Url;
 
@@ -345,7 +345,12 @@ pub async fn gaskiller_reporter(
     let (state_updates, opcodes) = compute_state_updates(trace).await?;
     let skipped_opcodes = opcodes.into_iter().collect::<Vec<_>>().join(", ");
     let gaskiller_gas_estimate = gk
-        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+        .estimate_state_changes_gas(
+            receipt
+                .to
+                .ok_or_else(|| anyhow!("receipt does not have to address"))?,
+            &state_updates,
+        )
         .await?;
     let gas_used = receipt.gas_used;
     let approx_gas_price_per_unit: f64 = receipt.effective_gas_price as f64 / gas_used as f64;
@@ -372,10 +377,17 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
     tx_request: TransactionRequest,
     gk: GasKillerDefault,
 ) -> Result<(Bytes, u64, HashSet<Opcode>)> {
+    let contract_address = tx_request
+        .to
+        .and_then(|x| match x {
+            TxKind::Call(address) => Some(address),
+            TxKind::Create => None,
+        })
+        .ok_or_else(|| anyhow!("receipt does not have to address"))?;
     let trace = get_trace_from_call(url, tx_request).await?;
     let (state_updates, skipped_opcodes) = compute_state_updates(trace).await?;
     let gas_estimate = gk
-        .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
+        .estimate_state_changes_gas(contract_address, &state_updates)
         .await?;
     Ok((
         encode_state_updates_to_abi(&state_updates),
@@ -401,16 +413,17 @@ mod tests {
     async fn test_csv_writer() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
+        let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
 
         let hash = "0x0df13f90b94773887709ce26216928c952e2d7f6d5af44198504ac6899fc5165";
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
+        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
         let bytes: [u8; 32] =
             hex::const_decode_to_array(hash.as_bytes()).expect("failed to decode transaction hash");
-        let gk = GasKillerDefault::new().await?;
+        let gk = GasKillerDefault::new(rpc_url).await?;
         let report = gas_estimate_tx(provider, bytes.into(), &gk).await?;
+
         let _ = File::create("test.csv")?;
         let mut writer = Writer::from_path("test.csv")?;
 
@@ -418,6 +431,78 @@ mod tests {
         writer.flush()?;
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_estimate_state_changes_gas_set() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
+            .parse()?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+
+        let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+        let (state_updates, _) = compute_state_updates(trace).await?;
+
+        let gk = GasKillerDefault::new(rpc_url).await?;
+        let gas_estimate = gk
+            .estimate_state_changes_gas(SIMPLE_STORAGE_ADDRESS, &state_updates)
+            .await?;
+        assert_eq!(gas_estimate, 32549);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_estimate_state_changes_gas_access_control() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
+            .parse()?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+
+        let tx_hash = ACCESS_CONTROL_MAIN_RUN_TX_HASH;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+        let (state_updates, _) = compute_state_updates(trace).await?;
+
+        let gk = GasKillerDefault::new(rpc_url).await?;
+        let gas_estimate = gk
+            .estimate_state_changes_gas(ACCESS_CONTROL_MAIN_ADDRESS, &state_updates)
+            .await?;
+        assert_eq!(gas_estimate, 37185);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_estimate_state_changes_gas_access_control_failure() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+            .expect("TESTNET_RPC_URL must be set")
+            .parse()?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+
+        let tx_hash = ACCESS_CONTROL_MAIN_RUN_TX_HASH;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+        let (state_updates, _) = compute_state_updates(trace).await?;
+
+        let gk = GasKillerDefault::new(rpc_url).await?;
+        let gas_estimate = gk
+            .estimate_state_changes_gas(FAKE_ADDRESS, &state_updates)
+            .await;
+        // Check that the error contains a certain substring
+        let error_msg = match gas_estimate {
+            Ok(_) => bail!("Expected error, got Ok"),
+            Err(e) => e.to_string(),
+        };
+
+        // cast sig "RevertingContext(address,bytes)"
+        assert!(error_msg.contains("custom error 0xaa86ecee"));
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_compute_state_updates_set() -> Result<()> {
         dotenv::dotenv().ok();
@@ -430,12 +515,6 @@ mod tests {
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
         let (state_updates, _) = compute_state_updates(trace).await?;
-
-        let gk = GasKillerDefault::new().await?;
-        let gas_estimate = gk
-            .estimate_state_changes_gas(&state_updates, WarmSlotsRule::AllStore)
-            .await?;
-        assert_eq!(gas_estimate, 32549);
 
         assert_eq!(state_updates.len(), 2);
         assert!(matches!(state_updates[0], StateUpdate::Store(_)));
