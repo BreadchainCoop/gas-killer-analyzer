@@ -80,8 +80,13 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
 
             let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
             println!("generating gaskiller reports...");
-            let (reports, block_hash) = gas_estimate_block(provider, identifier, gk).await?;
-            let path = Path::new("reports.csv");
+
+            let (reports, _) = gas_estimate_block(provider, identifier, gk).await?;
+            println!("fetched reports");
+            let output_file = std::env::var("OUTPUT_FILE")
+        .expect("OUTPUT_FILE must be set");
+            let path = Path::new(output_file.as_str());
+
             let exists = path::Path::exists(path);
             let file = OpenOptions::new()
                 .create(!exists)
@@ -90,20 +95,22 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
                 .unwrap();
             let mut writer = WriterBuilder::new().has_headers(!exists).from_writer(file);
             for report in reports {
-                writer.serialize(report)?;
-                writer.flush()?;
+                writer.serialize(&report)?;
+                println!("serialized {}", report.tx_hash);
             }
+            writer.flush()?;
+            println!("successfully wrote data to {output_file}");
 
-            println!("successfully wrote data to reports/{block_hash}.csv");
         }
         Some(Commands::Transaction(hash)) => {
             let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
-            let bytes: [u8; 32] = hex::const_decode_to_array(hash.as_bytes())
+             let bytes: [u8; 32] = hex::const_decode_to_array(hash.as_bytes())
                 .expect("failed to decode transaction hash");
+            let report = gas_estimate_tx(provider, bytes.into(), &gk).await?;
+              let output_file = std::env::var("OUTPUT_FILE")
+                .expect("OUTPUT_FILE must be set");
+            let path = Path::new(output_file.as_str());
 
-            let report = gas_estimate_tx(provider, bytes.into(), gk).await?;
-
-            let path = Path::new("reports.csv");
             let exists = path::Path::exists(path);
             let file = OpenOptions::new()
                 .create(!exists)
@@ -113,7 +120,7 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
             let mut writer = WriterBuilder::new().has_headers(!exists).from_writer(file);
             writer.serialize(report)?;
             writer.flush()?;
-            println!("successfully wrote data to reports.csv");
+            println!("successfully wrote data to {output_file}");
         }
 
         Some(Commands::Request(file)) => {
