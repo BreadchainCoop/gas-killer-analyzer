@@ -1,6 +1,8 @@
-use alloy::primitives::FixedBytes;
+use alloy::primitives::{Bytes, FixedBytes};
 use alloy_rpc_types::TransactionReceipt;
+use alloy_sol_types::SolValue;
 use serde_derive::Serialize;
+use crate::sol_types::DebugData;
 
 pub(crate) type Opcode = String;
 
@@ -18,10 +20,11 @@ pub struct GasKillerReport {
     pub function_selector: FixedBytes<4>,
     pub skipped_opcodes: String,
     pub error_log: Option<String>,
+    pub debug_data: Option<Bytes>
 }
 
 impl GasKillerReport {
-    pub fn report_error(receipt: &TransactionReceipt, e: &anyhow::Error) -> Self {
+    pub fn report_error(receipt: &TransactionReceipt, e: &anyhow::Error, debug_data: DebugData) -> Self {
         GasKillerReport {
             tx_hash: receipt.transaction_hash,
             block_hash: receipt.block_hash.unwrap_or_else(|| {
@@ -40,6 +43,7 @@ impl GasKillerReport {
             function_selector: FixedBytes::default(),
             skipped_opcodes: "".to_string(),
             error_log: Some(format!("{e:?}")),
+            debug_data: Some(debug_data.abi_encode().into())
         }
     }
     pub fn from(receipt: &TransactionReceipt, details: ReportDetails) -> Self {
@@ -61,6 +65,7 @@ impl GasKillerReport {
             function_selector: details.function_selector,
             skipped_opcodes: details.skipped_opcodes,
             error_log: None,
+            debug_data: None
         }
     }
 }

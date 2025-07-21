@@ -8,7 +8,7 @@ use std::{collections::HashSet, str::FromStr};
 use structs::{GasKillerReport, Opcode, ReportDetails};
 
 use alloy::{
-    primitives::{Address, Bytes, FixedBytes, TxKind},
+    primitives::{Address, Bytes, FixedBytes, TxKind, U256},
     providers::{Provider, ProviderBuilder, ext::DebugApi},
     rpc::types::{
         TransactionReceipt,
@@ -25,6 +25,8 @@ use anyhow::{Result, anyhow, bail};
 use gk::GasKillerDefault;
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
 use url::Url;
+
+use crate::sol_types::DebugData;
 
 const TURETZKY_UPPER_GAS_LIMIT: u64 = 200000u64;
 
@@ -297,9 +299,15 @@ pub async fn gas_estimate_block(
     let mut reports = Vec::new();
     for receipt in receipts {
         println!("processing {}", &receipt.transaction_hash);
+        let tx_data = provider.get_transaction_by_hash(receipt.transaction_hash).await?.unwrap();
+        let debug_data = DebugData {
+            preceedingBlocknumber: U256::from(receipt.block_number.unwrap() - 1),
+            target: receipt.to.unwrap(),
+            data: tx_data.input().clone()
+        };
         reports.push(get_report(&provider,receipt.transaction_hash, &receipt, &gk)
                      .await
-                     .unwrap_or_else(|e| GasKillerReport::report_error(&receipt, &e)));
+                     .unwrap_or_else(|e| GasKillerReport::report_error(&receipt, &e, debug_data)));
             println!("done");
     }
     Ok((reports, block_hash))
@@ -325,7 +333,13 @@ pub async fn get_report (provider: impl Provider, tx_hash: FixedBytes<32>, recei
 {
     let details = gaskiller_reporter(&provider, tx_hash, gk, receipt).await;
     if let Err(e) = details {
-        return Ok(GasKillerReport::report_error(receipt, &e));
+        let tx_data = provider.get_transaction_by_hash(tx_hash).await?.unwrap();
+        let debug_data = DebugData {
+            preceedingBlocknumber: U256::from(receipt.block_number.unwrap() - 1),
+            target: receipt.to.unwrap(),
+            data: tx_data.input().clone()
+        };
+        return Ok(GasKillerReport::report_error(receipt, &e, debug_data));
     }
    
     Ok(GasKillerReport::from(receipt, details.unwrap()))

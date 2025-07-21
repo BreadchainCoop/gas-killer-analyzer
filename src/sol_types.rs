@@ -54,6 +54,13 @@ sol! {
             bytes32 topic4;
         }
     }
+
+
+    struct DebugData {
+        uint256 preceedingBlocknumber;
+        address target;
+        bytes data;
+    }
 }
 
 sol! {
