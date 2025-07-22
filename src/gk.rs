@@ -74,6 +74,11 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
             .await?;
         let target_contract = StateChangeHandlerGasEstimator::new(contract_address, &self.provider);
 
+        self.provider
+            .anvil_set_balance
+            (contract_address, U256::from(100000000000000000000000000000u128))
+            .await?;
+
         let (types, args) = crate::encode_state_updates_to_sol(state_updates);
         let types = types.iter().map(|x| *x as u8).collect::<Vec<_>>();
         let tx = target_contract
