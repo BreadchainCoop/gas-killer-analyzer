@@ -1,5 +1,5 @@
 use alloy::{hex, providers::ProviderBuilder};
-use alloy_eips::{BlockId, BlockNumberOrTag, RpcBlockHash};
+use alloy_eips::BlockId;
 use alloy_rpc_types::TransactionRequest;
 use anyhow::Result;
 use colored::Colorize;
@@ -10,6 +10,7 @@ use gas_analyzer_rs::{
 };
 use std::fs::OpenOptions;
 use std::path::Path;
+use std::str::FromStr;
 use std::{env, path};
 use std::{fs::File, io::Read};
 use url::Url;
@@ -61,23 +62,11 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
         .await
         .expect("unable to initialize GasKiller");
     match cmd {
-        Some(Commands::Block(hash_or_tag)) => {
-            let identifier = match hash_or_tag.as_ref() {
-                "latest" => BlockId::Number(BlockNumberOrTag::Latest),
-                "finalized" => BlockId::Number(BlockNumberOrTag::Finalized),
-                "safe" => BlockId::Number(BlockNumberOrTag::Safe),
-                "earliest" => BlockId::Number(BlockNumberOrTag::Earliest),
-                "pending" => BlockId::Number(BlockNumberOrTag::Pending),
-                _ => {
-                    let id = hex::const_decode_to_array(hash_or_tag.as_bytes())
-                        .expect("failed to decode transaction hash");
-                    BlockId::Hash(RpcBlockHash {
-                        block_hash: id.into(),
-                        require_canonical: None,
-                    })
-                }
-            };
-
+        Some(Commands::Block(input)) => {
+      
+            
+            let identifier = BlockId::from_str(input.as_ref()).expect("failed to parse block identifier");
+ 
             let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
             println!("generating gaskiller reports...");
 
