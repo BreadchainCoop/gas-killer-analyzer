@@ -5,6 +5,7 @@ mod sol_types;
 pub mod structs;
 
 use std::{collections::HashSet, str::FromStr};
+use chrono::Utc;
 use structs::{GasKillerReport, Opcode, ReportDetails};
 
 use alloy::{
@@ -299,7 +300,7 @@ pub async fn gas_estimate_block(
         println!("processing {}", &receipt.transaction_hash);
         reports.push(get_report(&provider,receipt.transaction_hash, &receipt, &gk)
                      .await
-                     .unwrap_or_else(|e| GasKillerReport::report_error(&receipt, &e)));
+                     .unwrap_or_else(|e| GasKillerReport::report_error(Utc::now(), &receipt, &e)));
             println!("done");
     }
     Ok((reports, block_hash))
@@ -325,10 +326,10 @@ pub async fn get_report (provider: impl Provider, tx_hash: FixedBytes<32>, recei
 {
     let details = gaskiller_reporter(&provider, tx_hash, gk, receipt).await;
     if let Err(e) = details {
-        return Ok(GasKillerReport::report_error(receipt, &e));
+        return Ok(GasKillerReport::report_error(Utc::now(), receipt, &e));
     }
    
-    Ok(GasKillerReport::from(receipt, details.unwrap()))
+    Ok(GasKillerReport::from(Utc::now(), receipt, details.unwrap()))
 }
 
 pub async fn gaskiller_reporter(
