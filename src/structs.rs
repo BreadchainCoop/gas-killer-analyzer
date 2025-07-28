@@ -1,3 +1,5 @@
+use chrono::{DateTime, Utc};
+
 use alloy::primitives::FixedBytes;
 use alloy_rpc_types::TransactionReceipt;
 use serde_derive::Serialize;
@@ -6,6 +8,8 @@ pub(crate) type Opcode = String;
 
 #[derive(Serialize)]
 pub struct GasKillerReport {
+    pub time: DateTime<Utc>,
+    pub commit: String,
     pub tx_hash: FixedBytes<32>,
     pub block_hash: FixedBytes<32>,
     pub block_number: u64,
@@ -22,8 +26,12 @@ pub struct GasKillerReport {
 }
 
 impl GasKillerReport {
-    pub fn report_error(receipt: &TransactionReceipt, e: &anyhow::Error) -> Self {
+    pub fn report_error(time: DateTime<Utc>, receipt: &TransactionReceipt, e: &anyhow::Error) -> Self {
+          let commit = env!("GIT_HASH").to_string();
+           
         GasKillerReport {
+            time,
+            commit,
             tx_hash: receipt.transaction_hash,
             block_hash: receipt.block_hash.unwrap_or_else(|| {
                 panic!(
@@ -49,8 +57,12 @@ impl GasKillerReport {
             error_log: Some(format!("{e:?}")),
         }
     }
-    pub fn from(receipt: &TransactionReceipt, details: ReportDetails) -> Self {
+    pub fn from(time: DateTime<Utc>, receipt: &TransactionReceipt, details: ReportDetails) -> Self {
+        let commit = env!("GIT_HASH").to_string();
+        
         GasKillerReport {
+            time,
+            commit,
             tx_hash: receipt.transaction_hash,
             block_hash: receipt.block_hash.unwrap_or_else(|| {
                 panic!(
