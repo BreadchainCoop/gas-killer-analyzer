@@ -19,7 +19,7 @@ use alloy::{
     },
     sol_types::SolValue,
 };
-use alloy_eips::eip1898::BlockId;
+
 use alloy_rpc_types::TransactionTrait;
 use anyhow::{Result, anyhow, bail};
 use gk::GasKillerDefault;
@@ -280,20 +280,16 @@ pub async fn invokes_smart_contract(
 // computes state updates and estimates for each transaction one by one, nicer for CLI
 pub async fn gas_estimate_block(
     provider: impl Provider,
-    block_id: BlockId,
+    all_receipts: Vec<TransactionReceipt>,
     gk: GasKillerDefault,
-) -> Result<(Vec<GasKillerReport>, FixedBytes<32>)> {
-    let all_receipts = provider
-        .get_block_receipts(block_id)
-        .await?
-        .expect("block receipts retrieval failed");
-    let block_hash = all_receipts[0]
-        .block_hash
-        .expect("couldn't find block hash in receipt");
+) -> Result<Vec<GasKillerReport>> {
+     let block_number = all_receipts[0]
+                .block_number
+        .expect("couldn't find block number in receipt");
+    //TODO: filter out non-smart-contract tx
+    let receipts: Vec<_> = all_receipts.into_iter().filter(|x| x.gas_used > TURETZKY_UPPER_GAS_LIMIT && x.to.is_some()).collect(); 
     
-    let receipts: Vec<_> = all_receipts.into_iter().filter(|x| x.gas_used > TURETZKY_UPPER_GAS_LIMIT).collect();
-    
-    println!("got {} receipts for block {}", receipts.len(), block_hash);
+    println!("got {} receipts for block {}", receipts.len(), block_number);
     let mut reports = Vec::new();
     for receipt in receipts {
         println!("processing {}", &receipt.transaction_hash);
@@ -302,7 +298,7 @@ pub async fn gas_estimate_block(
                      .unwrap_or_else(|e| GasKillerReport::report_error(&receipt, &e)));
             println!("done");
     }
-    Ok((reports, block_hash))
+    Ok(reports)
 }
 
 pub async fn gas_estimate_tx(
@@ -313,8 +309,8 @@ pub async fn gas_estimate_tx(
     
    let receipt = provider.get_transaction_receipt(tx_hash).await?.ok_or_else(|| anyhow!("could not get receipt for tx 0x{}", tx_hash))?;
     let smart_contract_tx = invokes_smart_contract(&provider, &receipt).await?;
-    if (receipt.gas_used <= TURETZKY_UPPER_GAS_LIMIT) || !smart_contract_tx {
-        bail! ("Skipped: either gas used is less than or equal to TUGL or no smart contract calls are made")
+    if receipt.gas_used <= TURETZKY_UPPER_GAS_LIMIT || !smart_contract_tx || receipt.to.is_none() {
+        bail! ("Skipped: either 1) gas used is less than or equal to TUGL or 2) no smart contract calls are made or 3) contract creation transaction")
     }
 
     get_report(&provider, tx_hash, &receipt, gk).await
@@ -348,7 +344,7 @@ pub async fn gaskiller_reporter(
         .estimate_state_changes_gas(
             receipt
                 .to
-                .ok_or_else(|| anyhow!("receipt does not have to address"))?,
+                .unwrap(), // already check if this is None in gas_estimate_tx
             &state_updates,
         )
         .await?;

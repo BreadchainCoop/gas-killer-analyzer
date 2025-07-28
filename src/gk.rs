@@ -2,18 +2,17 @@ use crate::sol_types::StateUpdate;
 use alloy::{
     network::EthereumWallet,
     node_bindings::{Anvil, AnvilInstance},
-    primitives::{Address, Bytes},
+    primitives::{Address, Bytes, U256},
     providers::{
-        Identity, ProviderBuilder, RootProvider,
         fillers::{
             BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller,
             WalletFiller,
-        },
+        }, Identity, ProviderBuilder, RootProvider
     },
     signers::local::PrivateKeySigner,
     sol,
 };
-use alloy_provider::{Provider, ext::AnvilApi};
+use alloy_provider::{{ext::AnvilApi}, Provider};
 use anyhow::{Result, bail};
 use url::Url;
 
@@ -43,8 +42,16 @@ pub struct GasKiller<P> {
 }
 
 impl GasKiller<ConnectHTTPDefaultProvider> {
-    pub async fn new(fork_url: Url) -> Result<Self> {
-        let anvil = Anvil::new().fork(fork_url.as_str()).try_spawn()?;
+    pub async fn new(fork_url: Url, block_number: Option<u64>) -> Result<Self> {
+        let anvil_init = Anvil::new().fork(fork_url.as_str());
+        
+        let anvil = if let Some(number) = block_number {
+            anvil_init.fork_block_number(number - 1).try_spawn()?
+        }
+        else {
+         anvil_init.try_spawn()?
+            
+        };
         let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
         let provider = ProviderBuilder::new()
             .wallet(signer)
@@ -54,8 +61,10 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
         // Alloy's sol macro generates a BYTECODE and DEPLOYED_BYTECODE fields for contracts,
         // but I don't get how is it possible since deployed bytecode is dependant on constructor arguments
         // so I'm just deploying a contract and getting the code from it
-        let code = provider.get_code_at(*contract.address()).await?;
-
+        let address = *contract.address();
+       
+        let code = provider.get_code_at(address).await?;
+       
         Ok(Self {
             _anvil: anvil,
             provider,
@@ -68,6 +77,8 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
         contract_address: Address,
         state_updates: &[StateUpdate],
     ) -> Result<u64> {
+        let initial_block_number = self.provider.get_block_number().await?;
+        let snapshot_id: U256 = self.provider.raw_request("evm_snapshot".into(), ()).await?;
         let original_code = self.provider.get_code_at(contract_address).await?;
         self.provider
             .anvil_set_code(contract_address, self.code.clone())
@@ -93,6 +104,11 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
         self.provider
             .anvil_set_code(contract_address, original_code)
             .await?;
+        
+        let reverted: bool = self.provider.raw_request("evm_revert".into(), (snapshot_id,)).await?;
+        assert!(reverted);
+        let final_block_number = self.provider.get_block_number().await?;
+        assert_eq!(initial_block_number, final_block_number, "block number should revert to initial state");
         Ok(receipt.gas_used)
     }
 }
