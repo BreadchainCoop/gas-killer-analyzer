@@ -9,6 +9,7 @@ pub(crate) type Opcode = String;
 #[derive(Serialize)]
 pub struct GasKillerReport {
     pub time: DateTime<Utc>,
+    pub commit: String,
     pub tx_hash: FixedBytes<32>,
     pub block_hash: FixedBytes<32>,
     pub gas_used: u64,
@@ -25,8 +26,11 @@ pub struct GasKillerReport {
 
 impl GasKillerReport {
     pub fn report_error(time: DateTime<Utc>, receipt: &TransactionReceipt, e: &anyhow::Error) -> Self {
+          let commit = env!("GIT_HASH").to_string();
+           
         GasKillerReport {
             time,
+            commit,
             tx_hash: receipt.transaction_hash,
             block_hash: receipt.block_hash.unwrap_or_else(|| {
                 panic!(
@@ -47,8 +51,11 @@ impl GasKillerReport {
         }
     }
     pub fn from(time: DateTime<Utc>, receipt: &TransactionReceipt, details: ReportDetails) -> Self {
+        let commit = env!("GIT_HASH").to_string();
+        
         GasKillerReport {
             time,
+            commit,
             tx_hash: receipt.transaction_hash,
             block_hash: receipt.block_hash.unwrap_or_else(|| {
                 panic!(
