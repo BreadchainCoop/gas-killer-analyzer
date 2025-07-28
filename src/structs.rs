@@ -8,6 +8,7 @@ pub(crate) type Opcode = String;
 pub struct GasKillerReport {
     pub tx_hash: FixedBytes<32>,
     pub block_hash: FixedBytes<32>,
+    pub block_number: u64,
     pub gas_used: u64,
     pub gas_cost: u128,
     pub approx_gas_unit_price: f64,
@@ -30,6 +31,12 @@ impl GasKillerReport {
                     receipt.transaction_hash
                 )
             }),
+             block_number: receipt.block_number.unwrap_or_else(|| {
+                panic!(
+                    "couldn't retrieve block number for tx {}",
+                    receipt.transaction_hash
+                )
+            }),
             gas_used: receipt.gas_used,
             gas_cost: receipt.effective_gas_price,
             approx_gas_unit_price: receipt.effective_gas_price as f64 / receipt.gas_used as f64, 
@@ -48,6 +55,12 @@ impl GasKillerReport {
             block_hash: receipt.block_hash.unwrap_or_else(|| {
                 panic!(
                     "couldn't retrieve block hash for tx {}",
+                    receipt.transaction_hash
+                )
+            }),
+              block_number: receipt.block_number.unwrap_or_else(|| {
+                panic!(
+                    "couldn't retrieve block number for tx {}",
                     receipt.transaction_hash
                 )
             }),
