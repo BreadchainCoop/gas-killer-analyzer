@@ -2,7 +2,7 @@ use crate::sol_types::StateUpdate;
 use alloy::{
     network::EthereumWallet,
     node_bindings::{Anvil, AnvilInstance},
-    primitives::{Address, Bytes},
+    primitives::{U256, Address, Bytes},
     providers::{
         Identity, ProviderBuilder, RootProvider,
         fillers::{
