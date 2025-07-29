@@ -310,8 +310,8 @@ pub async fn gas_estimate_tx(
     
    let receipt = provider.get_transaction_receipt(tx_hash).await?.ok_or_else(|| anyhow!("could not get receipt for tx 0x{}", tx_hash))?;
     let smart_contract_tx = invokes_smart_contract(&provider, &receipt).await?;
-    if receipt.gas_used <= TURETZKY_UPPER_GAS_LIMIT || !smart_contract_tx || receipt.to.is_none() {
-        bail! ("Skipped: either 1) gas used is less than or equal to TUGL or 2) no smart contract calls are made or 3) contract creation transaction")
+    if receipt.gas_used <= TURETZKY_UPPER_GAS_LIMIT || !smart_contract_tx || receipt.to.is_none() || !receipt.status() {
+        bail! ("Skipped: either 1) gas used is less than or equal to TUGL or 2) no smart contract calls are made or 3) contract creation transaction or 4) transaction failed")
     }
 
     get_report(&provider, tx_hash, &receipt, gk).await
