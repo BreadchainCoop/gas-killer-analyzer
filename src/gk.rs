@@ -93,14 +93,18 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
 
         let (types, args) = crate::encode_state_updates_to_sol(state_updates);
         let types = types.iter().map(|x| *x as u8).collect::<Vec<_>>();
+        println!("before runStateUpdatesCall");
         let tx = target_contract
             .runStateUpdatesCall(types, args)
             .send()
             .await?;
+        println!("after runStateUpdatesCall");
         let receipt = tx.get_receipt().await?;
+        println!("after get_receipt");
         if !receipt.status() {
             bail!("Transaction failed");
         }
+        println!("after status check");
 
         self.provider
             .anvil_set_code(contract_address, original_code)

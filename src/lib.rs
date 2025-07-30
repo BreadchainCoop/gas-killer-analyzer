@@ -284,20 +284,20 @@ pub async fn gas_estimate_block(
     all_receipts: Vec<TransactionReceipt>,
     gk: GasKillerDefault,
 ) -> Result<Vec<GasKillerReport>> {
-     let block_number = all_receipts[0]
-                .block_number
-        .expect("couldn't find block number in receipt");
-    //TODO: filter out non-smart-contract tx
-    let receipts: Vec<_> = all_receipts.into_iter().filter(|x| x.gas_used > TURETZKY_UPPER_GAS_LIMIT && x.to.is_some()).collect(); 
-    
-    println!("got {} receipts for block {}", receipts.len(), block_number);
     let mut reports = Vec::new();
-    for receipt in receipts {
+    for receipt in all_receipts {
         println!("processing {}", &receipt.transaction_hash);
-        reports.push(get_report(&provider,receipt.transaction_hash, &receipt, &gk)
-                     .await
-                     .unwrap_or_else(|e| GasKillerReport::report_error(Utc::now(), &receipt, &e)));
-            println!("done");
+        match gas_estimate_tx(&provider, receipt.transaction_hash, &gk).await {
+            Ok(report) => {
+                match report.error_log {
+                    Some(_) => println!("report created (estimation failed)"),
+                    None => println!("report created (estimation successful)"),
+                }
+                reports.push(report);
+            },
+            Err(e) => println!("error: {:?}", e),
+        }
+        println!("done");
     }
     Ok(reports)
 }
