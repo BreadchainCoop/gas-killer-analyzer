@@ -1,7 +1,7 @@
 #!/bin/bash 
 #set -x
 
-export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+
 
 # --- Configuration ---
 # The public RPC endpoint for the Ethereum mainnet.
@@ -24,6 +24,7 @@ done < <(curl -s -X POST -H "Content-Type: application/json" \
 
 # Step 2: Iterate over the array
 echo "Found ${#TX_HASHES[@]} transactions with gas used > 200,000"
+cd target/debug 
 for hash in "${TX_HASHES[@]}"; do
   echo "Processing transaction: $hash"
   ./cli t "$hash"
