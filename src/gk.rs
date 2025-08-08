@@ -152,10 +152,6 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
             .context("something went incredibly wrong, rpc error contained invalid hex value")?;
         let reverting_context = RevertingContext::abi_decode(&reverting_context_error_hex)
             .context("something went incredibly wrong, RevertingContext rpc error wasn't valid abi encoded")?;
-        let sigantures_identifier = SignaturesIdentifier::new(false).map_err(|e| anyhow!("detected RevertingContext error, but could not access SignaturesIdentifier service. error: {}", e))?;
-        // TODO: possible to parallelize requests to signatures_identifier
-        let revert_selector = reverting_context.revertData.get(0..4).map(|bytes| Selector::try_from(bytes).unwrap());
-        let error = (match revert_selector {
         let signatures_identifier = SignaturesIdentifier::new(false).map_err(|e| anyhow!("detected RevertingContext error, but could not access SignaturesIdentifier service. error: {}", e))?;
         // TODO: possible to parallelize requests to signatures_identifier
         let revert_selector = reverting_context.revertData.get(0..4).map(|bytes| Selector::try_from(bytes).unwrap());
