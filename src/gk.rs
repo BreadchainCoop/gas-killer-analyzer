@@ -132,7 +132,6 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
                 let data_inner = data.get().trim_matches('"');
                 if !data_inner.starts_with(&selector_hex) {
                     println!("{}", data_inner);
-                    println!("yep");
                     Err(None)
                 } else {
                     Self::process_reverting_context_error(data_inner).await.map_err(Some)
