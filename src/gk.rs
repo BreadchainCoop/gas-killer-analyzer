@@ -142,7 +142,7 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
 
         match processed_error {
             Ok(processed_error) => processed_error,
-            Err(Some(processsing_error)) => Err::<(), _>(processsing_error).context(format!("error processing error, original error: {}", error)).unwrap_err(),
+            Err(Some(processing_error)) => Err::<(), _>(processing_error).context(format!("error processing error, original error: {}", error)).unwrap_err(),
             Err(None) => error.into()
         }
     }
