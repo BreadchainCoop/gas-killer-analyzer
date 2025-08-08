@@ -156,7 +156,11 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
         // TODO: possible to parallelize requests to signatures_identifier
         let revert_selector = reverting_context.revertData.get(0..4).map(|bytes| Selector::try_from(bytes).unwrap());
         let error = (match revert_selector {
-            Some(revert_selector) => sigantures_identifier.identify_error(revert_selector).await,
+        let signatures_identifier = SignaturesIdentifier::new(false).map_err(|e| anyhow!("detected RevertingContext error, but could not access SignaturesIdentifier service. error: {}", e))?;
+        // TODO: possible to parallelize requests to signatures_identifier
+        let revert_selector = reverting_context.revertData.get(0..4).map(|bytes| Selector::try_from(bytes).unwrap());
+        let error = (match revert_selector {
+            Some(revert_selector) => signatures_identifier.identify_error(revert_selector).await,
             None => None
         }).and_then(|identified_error| match identified_error.decode_error(&reverting_context.revertData) {
             Ok(decoded_error) => Some((identified_error, decoded_error)),
