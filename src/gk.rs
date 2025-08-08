@@ -169,7 +169,7 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
 
         let function_selector = reverting_context.callargs.get(0..4).map(|bytes| Selector::try_from(bytes).unwrap());
         let function = (match function_selector {
-            Some(function_selector) => sigantures_identifier.identify_function(function_selector).await,
+            Some(function_selector) => signatures_identifier.identify_function(function_selector).await,
             None => None
         }).and_then(|identified_function| match identified_function.abi_decode_input(&reverting_context.callargs) {
             Ok(decoded_input) => Some((identified_function, decoded_input)),
