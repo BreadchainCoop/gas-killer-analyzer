@@ -128,7 +128,6 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
     async fn process_simulation_error(error: contract::Error) -> Error {
         let processed_error = match &error {
             contract::Error::TransportError(RpcError::ErrorResp(ErrorPayload { code: 3, data: Some(data), ..})) => {
-                // TODO: can be computed during build time
                 let selector_hex = format!("0x{}", hex::encode(RevertingContext::SELECTOR));
                 let data_inner = data.get().trim_matches('"');
                 if !data_inner.starts_with(&selector_hex) {
