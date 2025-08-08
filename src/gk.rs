@@ -179,7 +179,7 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
             Some((identified_function, decoded_input)) => {
                 format!("{} with values ({})", identified_function.signature(), format_decoded_values(&decoded_input))
             }
-            None => format!("Unrecognized funcdtion: {:?}", reverting_context.callargs),
+            None => format!("Unrecognized function: {:?}", reverting_context.callargs),
         };
 
         let error_string = match error {
