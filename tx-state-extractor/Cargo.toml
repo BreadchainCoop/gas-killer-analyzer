@@ -1,0 +1,36 @@
+[package]
+name = "tx-state-extractor"
+version = "0.1.0"
+edition = "2021"
+authors = ["BreadchainCoop"]
+description = "Standalone Ethereum transaction state update extractor"
+license = "MIT"
+repository = "https://github.com/BreadchainCoop/gas-analyzer-rs"
+keywords = ["ethereum", "transaction", "state-updates", "tracing", "evm"]
+categories = ["cryptography::cryptocurrencies", "parsing"]
+
+[dependencies]
+alloy = { version = "0.8", features = ["providers", "rpc", "rpc-types", "sol-types", "contract"] }
+alloy-provider = { version = "0.8", features = ["debug-api"] }
+alloy-rpc-types = { version = "0.8", features = ["trace"] }
+alloy-primitives = "0.8"
+tokio = { version = "1.41", features = ["full"] }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+dotenv = "0.15"
+pretty_assertions = "1.4"
+
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
+
+[features]
+default = []
+full = ["encoding"]
+encoding = []
