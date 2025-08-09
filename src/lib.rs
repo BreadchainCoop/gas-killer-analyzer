@@ -1,8 +1,9 @@
 #[allow(dead_code)]
 mod constants;
 pub mod gk;
-mod sol_types;
+pub mod sol_types;
 pub mod structs;
+pub mod tx_extractor;
 
 use std::{collections::HashSet, str::FromStr};
 use chrono::Utc;
@@ -144,7 +145,7 @@ fn append_to_state_updates(
     Ok(None)
 }
 
-async fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpdate>, HashSet<Opcode>)> {
+pub async fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpdate>, HashSet<Opcode>)> {
     let mut state_updates: Vec<StateUpdate> = Vec::new();
     // depth for which we care about state updates happening in
     let mut target_depth = 1;
@@ -166,7 +167,7 @@ async fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpdate>,
     Ok((state_updates, skipped_opcodes))
 }
 
-async fn get_tx_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
+pub async fn get_tx_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
     let tx_receipt = provider
         .get_transaction_receipt(tx_hash)
         .await?
