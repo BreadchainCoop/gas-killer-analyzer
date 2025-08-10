@@ -10,12 +10,18 @@ To use the transaction state extractor in your own Rust project, add gas-analyze
 
 ```toml
 [dependencies]
+# After this PR is merged to main:
 gas-analyzer-rs = { git = "https://github.com/BreadchainCoop/gas-analyzer-rs.git", branch = "main" }
+
+# Or use this PR's branch directly:
+gas-analyzer-rs = { git = "https://github.com/BreadchainCoop/gas-analyzer-rs.git", branch = "minimal-tx-state-extractor" }
+
 # Or use a specific commit/tag for stability:
 # gas-analyzer-rs = { git = "https://github.com/BreadchainCoop/gas-analyzer-rs.git", rev = "COMMIT_HASH" }
 
-# You'll also need these peer dependencies
+# Required peer dependencies
 alloy = { version = "1.0", features = ["providers", "rpc", "rpc-types"] }
+alloy-provider = { version = "1.0", features = ["debug-api"] }
 tokio = { version = "1.0", features = ["full"] }
 anyhow = "1.0"
 ```
@@ -141,6 +147,53 @@ fn process_state_update(update: &StateUpdate) {
         // Log2, Log3, Log4 follow the same pattern
         _ => {}
     }
+}
+```
+
+### Minimizing What Gets Imported
+
+While you can't import just the `tx_extractor` module as a separate crate, the Rust compiler will optimize out unused code. To minimize what gets pulled in:
+
+```rust
+// Only import what you need
+use gas_analyzer_rs::tx_extractor::{from_rpc_url, TxStateExtractor, StateUpdateReport};
+use gas_analyzer_rs::sol_types::StateUpdate;
+
+// Don't import other modules unless needed
+// NOT: use gas_analyzer_rs::*;
+// NOT: use gas_analyzer_rs::gk;
+// NOT: use gas_analyzer_rs::structs;
+```
+
+### Tested Example
+
+This has been tested with Holesky testnet. Here's a complete working example:
+
+```rust
+// Tested with:
+// RPC: QuickNode Holesky endpoint
+// Transaction: 0xbcb9e0b361ca9567d2d5ef094edcf7a8553e1ba76d3e298d0419762012dc9148
+
+use gas_analyzer_rs::tx_extractor::from_rpc_url;
+use alloy::primitives::FixedBytes;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let rpc_url = "https://your-holesky-rpc-endpoint";
+    let tx_hash: FixedBytes<32> = "0xbcb9e0b361ca9567d2d5ef094edcf7a8553e1ba76d3e298d0419762012dc9148".parse()?;
+    
+    let extractor = from_rpc_url(rpc_url)?;
+    let report = extractor.extract_with_metadata(tx_hash).await?;
+    
+    println!("Transaction from: {:?}", report.from);
+    println!("Found {} state updates:", report.state_updates.len());
+    // Output:
+    // Transaction from: 0xf151d21df4ffcf4d794425d3e98b53d2aecbd7e5
+    // Found 3 state updates:
+    // - 1 SSTORE operation
+    // - 2 CALL operations
+    
+    Ok(())
 }
 ```
 
