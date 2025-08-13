@@ -131,7 +131,6 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
                 let selector_hex = format!("0x{}", hex::encode(RevertingContext::SELECTOR));
                 let data_inner = data.get().trim_matches('"');
                 if !data_inner.starts_with(&selector_hex) {
-                    println!("{}", data_inner);
                     Err(None)
                 } else {
                     Self::process_reverting_context_error(data_inner).await.map_err(Some)
