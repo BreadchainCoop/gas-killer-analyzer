@@ -1,12 +1,11 @@
 #[allow(dead_code)]
-mod constants;
-pub mod gk;
-mod sol_types;
+pub mod commands;
+// pub mod gk;
+pub mod sol_types;
 pub mod structs;
 
 use std::{collections::HashSet, str::FromStr};
-use chrono::Utc;
-use structs::{GasKillerReport, Opcode, ReportDetails};
+use structs::{Opcode};
 
 use alloy::{
     primitives::{Address, Bytes, FixedBytes, TxKind},
@@ -23,7 +22,6 @@ use alloy::{
 
 use alloy_rpc_types::TransactionTrait;
 use anyhow::{Result, anyhow, bail};
-use gk::GasKillerDefault;
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
 use url::Url;
 
@@ -50,7 +48,7 @@ fn parse_trace_memory(memory: Vec<String>) -> Vec<u8> {
         .collect::<Vec<u8>>()
 }
 
-fn append_to_state_updates(
+pub fn append_to_state_updates(
     state_updates: &mut Vec<StateUpdate>,
     struct_log: StructLog,
 ) -> Result<Option<Opcode>> {
@@ -144,7 +142,7 @@ fn append_to_state_updates(
     Ok(None)
 }
 
-async fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpdate>, HashSet<Opcode>)> {
+pub async fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpdate>, HashSet<Opcode>)> {
     let mut state_updates: Vec<StateUpdate> = Vec::new();
     // depth for which we care about state updates happening in
     let mut target_depth = 1;

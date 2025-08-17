@@ -1,56 +1,40 @@
-use alloy::{hex, providers::ProviderBuilder};
-use alloy_eips::BlockId;
-use alloy_provider::Provider;
-use alloy_rpc_types::TransactionRequest;
+use std::env;
+use std::path::PathBuf;
 use anyhow::Result;
-use colored::Colorize;
-use csv::WriterBuilder;
-use gas_analyzer_rs::{
-    call_to_encoded_state_updates_with_gas_estimate, gas_estimate_block, gas_estimate_tx,
-    gk::GasKillerDefault,
-};
-use std::fs::OpenOptions;
-use std::path::Path;
-use std::str::FromStr;
-use std::{env, path};
-use std::{fs::File, io::Read};
+use alloy_eips::eip1898::BlockId;
+use clap::{Parser, Subcommand};
+use gas_analyzer_rs::commands;
 use url::Url;
 
 enum Commands {
-    Block(String),
-    Transaction(String),
-    Request(String),
+    Block {
+        /// The block to estimate gas against
+        block: BlockId,
+    },
 }
 
 #[tokio::main]
-async fn main() {
-    dotenv::dotenv().ok();
-    let args: Vec<String> = env::args().collect();
-    let command: Option<Commands> = if args.len() < 3 {
-        None
-    } else {
-        let input_type: &str = &args[1];
+async fn main() -> Result<()> {
+    let out_path = env::var("OUT_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let mut default_path = PathBuf::new();
+            default_path.push(".");
+            default_path.push("out");
+            default_path
+        });
+    let fork_url = env::var("FORK_URL").expect("FORK_URL must be set");
+    // let config = Config {
+    //     out_path,
+    //     fork_url: Url::parse(&fork_url).expect("FORK_URL must be a valid URL"),
+    // };
 
-        match input_type {
-            "b" | "block" => {
-                let value = &args[2];
-                Some(Commands::Block(value.clone()))
-            }
-            "t" | "tx" => {
-                let value = &args[2];
-                Some(Commands::Transaction(value.clone()))
-            }
-            "r" | "request" => {
-                let value = &args[2];
-                Some(Commands::Request(value.clone()))
-            }
-            _ => None,
-        }
-    };
+    let cli = Cli::parse();
 
-    let result = execute_command(command).await;
-    if let Err(e) = result {
-        println!("{e:?}");
+    match cli.command {
+        Commands::Block { block } => {
+            commands::block::run(block).await
+        },
     }
 }
 
