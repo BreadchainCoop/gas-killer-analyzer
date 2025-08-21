@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use alloy::{consensus::EthereumTypedTransaction, network::{TransactionBuilder, TransactionBuilder7702}, node_bindings::Anvil, primitives::{Address, Bytes, TxKind, U256}, signers::local::PrivateKeySigner, sol};
 use alloy_rpc_types::{AccessList, BlockTransactions, Transaction, TransactionReceipt, TransactionRequest};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use alloy_eips::{eip1898::BlockId, eip7702::SignedAuthorization};
 use alloy_provider::{ext::AnvilApi, Provider, ProviderBuilder};
 use futures::{stream, StreamExt, TryStreamExt};
@@ -23,6 +23,7 @@ pub async fn run(block_id: BlockId) -> Result<()> {
         .expect("FORK_URL must be a valid URL");
     let regular_provider = ProviderBuilder::new().connect_http(fork_url.clone());
     let block_number = regular_provider.get_block_number_by_id(block_id).await?.expect("block number must be found");
+    println!("block number: {}", block_number);
     let anvil = Anvil::new()
         .args(["--order", "fifo"])
         .fork(fork_url.as_str())
@@ -86,20 +87,41 @@ pub async fn run(block_id: BlockId) -> Result<()> {
     let mut tx_hashes = Vec::new();
     println!("sending txs...");
     for tx in txs {
+        match &tx.typed_transaction_data {
+            TypedTransactionData::Eip7702 { .. } => {
+                println!("skipping EIP-7702 tx");
+                continue;
+            }
+            _ => {}
+        };
+
         let tx_request = match tx.tx_kind_data {
             TxKindData::SmartContract { to, code, .. } => {
                 if !stepped_smart_contracts.contains(&to) {
-                    println!("before this...");
-                    let contract = StateChangeHandlerGasEstimator::deploy(&bin_provider, code).await?;
-                    println!("after this...");
+                    println!("deploying gas estimator...");
+                    println!("code_len: {:?}", code.len());
+                    if code[0] == 0xEF {
+                        println!("code[0] is 0xEF, skipping");
+                        continue;
+                    }
+                    let code_clone = code.clone();
+                    let contract = StateChangeHandlerGasEstimator::deploy(&bin_provider, code)
+                        .await
+                        .with_context(|| format!("the code being deployed: {:?}", &code_clone))?;
+                    println!("retrieving computed gas estimator code...");
                     let gas_estimator_code = bin_provider.get_code_at(*contract.address()).await?;
+                    println!("setting code...");
                     forked_provider.anvil_set_code(to, gas_estimator_code).await?;
                     stepped_smart_contracts.insert(to);
                 }
 
+                println!("getting trace...");
                 let trace = get_tx_trace(&forked_provider, tx.tx.inner.hash().to_owned()).await?;
+                println!("computing state updates...");
                 let (state_updates, _skipped_opcodes) = compute_state_updates(trace).await?;
+                println!("encoding state updates...");
                 let state_updates_abi = encode_state_updates_to_abi(&state_updates);
+                println!("done!");
 
                 let tx_request = TransactionRequest::default()
                     .with_from(tx.receipt.from)
@@ -130,10 +152,13 @@ pub async fn run(block_id: BlockId) -> Result<()> {
             }
         };
 
+        println!("sending tx...");
         let tx = forked_provider.send_transaction(tx_request).await?.register();
         tx_hashes.push(tx);
+        println!("tx sent!");
     }
 
+    println!("mining block...");
     forked_provider.anvil_mine(Some(1), None).await?;
     let block = forked_provider.get_block_by_number(alloy_eips::BlockNumberOrTag::Latest).await?.expect("block must be found");
     println!("block: {:?}", block);
