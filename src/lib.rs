@@ -165,15 +165,6 @@ pub async fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpda
 }
 
 async fn get_tx_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
-    let tx_receipt = provider
-        .get_transaction_receipt(tx_hash)
-        .await?
-        .ok_or_else(|| anyhow!("could not get receipt for tx {}", tx_hash))?;
-
-    if !tx_receipt.status() {
-        bail!("transaction failed");
-    }
-
     let options = GethDebugTracingOptions {
         config: GethDefaultTracingOptions {
             enable_memory: Some(true),
