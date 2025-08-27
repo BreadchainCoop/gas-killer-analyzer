@@ -1,36 +1,36 @@
-use gas_analyzer_rs::tx_extractor::{from_rpc_url, StateUpdateReport};
-use gas_analyzer_rs::sol_types::StateUpdate;
 use alloy::primitives::FixedBytes;
 use anyhow::Result;
+use gas_analyzer_rs::sol_types::StateUpdate;
+use gas_analyzer_rs::tx_extractor::{StateUpdateReport, from_rpc_url};
 use std::env;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Get transaction hash from command line or use example
     let args: Vec<String> = env::args().collect();
-    let tx_hash_str = args.get(1)
+    let tx_hash_str = args
+        .get(1)
         .map(|s| s.as_str())
         .unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000");
-    
+
     // Get RPC URL from environment or use default
-    let rpc_url = env::var("RPC_URL")
-        .unwrap_or_else(|_| "https://eth.llamarpc.com".to_string());
-    
+    let rpc_url = env::var("RPC_URL").unwrap_or_else(|_| "https://eth.llamarpc.com".to_string());
+
     println!("Extracting state updates for transaction: {}", tx_hash_str);
     println!("Using RPC URL: {}", rpc_url);
-    
+
     // Parse transaction hash
     let tx_hash: FixedBytes<32> = tx_hash_str.parse()?;
-    
+
     // Create extractor from RPC URL
     let extractor = from_rpc_url(&rpc_url)?;
-    
+
     // Extract state updates with metadata
     match extractor.extract_with_metadata(tx_hash).await {
         Ok(report) => print_report(&report),
         Err(e) => {
             eprintln!("Error extracting state updates: {}", e);
-            
+
             // Try basic extraction without metadata
             println!("\nTrying basic extraction...");
             match extractor.extract_state_updates(tx_hash).await {
@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -55,9 +55,15 @@ fn print_report(report: &StateUpdateReport) {
     println!("To: {:?}", report.to);
     println!("Value: {} wei", report.value);
     println!("Gas Used: {}", report.gas_used);
-    println!("Status: {}", if report.status { "Success" } else { "Failed" });
-    
-    println!("\n=== State Updates ({} total) ===", report.state_updates.len());
+    println!(
+        "Status: {}",
+        if report.status { "Success" } else { "Failed" }
+    );
+
+    println!(
+        "\n=== State Updates ({} total) ===",
+        report.state_updates.len()
+    );
     for (i, update) in report.state_updates.iter().enumerate() {
         println!("\n[Update #{}]", i + 1);
         match update {

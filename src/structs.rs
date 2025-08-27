@@ -26,9 +26,13 @@ pub struct GasKillerReport {
 }
 
 impl GasKillerReport {
-    pub fn report_error(time: DateTime<Utc>, receipt: &TransactionReceipt, e: &anyhow::Error) -> Self {
-          let commit = env!("GIT_HASH").to_string();
-           
+    pub fn report_error(
+        time: DateTime<Utc>,
+        receipt: &TransactionReceipt,
+        e: &anyhow::Error,
+    ) -> Self {
+        let commit = env!("GIT_HASH").to_string();
+
         GasKillerReport {
             time,
             commit,
@@ -39,7 +43,7 @@ impl GasKillerReport {
                     receipt.transaction_hash
                 )
             }),
-             block_number: receipt.block_number.unwrap_or_else(|| {
+            block_number: receipt.block_number.unwrap_or_else(|| {
                 panic!(
                     "couldn't retrieve block number for tx {}",
                     receipt.transaction_hash
@@ -47,7 +51,7 @@ impl GasKillerReport {
             }),
             gas_used: receipt.gas_used,
             gas_cost: receipt.effective_gas_price,
-            approx_gas_unit_price: receipt.effective_gas_price as f64 / receipt.gas_used as f64, 
+            approx_gas_unit_price: receipt.effective_gas_price as f64 / receipt.gas_used as f64,
             gaskiller_gas_estimate: 0,
             gaskiller_estimated_gas_cost: 0.0,
             gas_savings: 0,
@@ -59,7 +63,7 @@ impl GasKillerReport {
     }
     pub fn from(time: DateTime<Utc>, receipt: &TransactionReceipt, details: ReportDetails) -> Self {
         let commit = env!("GIT_HASH").to_string();
-        
+
         GasKillerReport {
             time,
             commit,
@@ -70,7 +74,7 @@ impl GasKillerReport {
                     receipt.transaction_hash
                 )
             }),
-              block_number: receipt.block_number.unwrap_or_else(|| {
+            block_number: receipt.block_number.unwrap_or_else(|| {
                 panic!(
                     "couldn't retrieve block number for tx {}",
                     receipt.transaction_hash
@@ -91,8 +95,8 @@ impl GasKillerReport {
 }
 
 pub struct ReportDetails {
-    pub approx_gas_price_per_unit : f64,
-        pub gaskiller_gas_estimate: u64,
+    pub approx_gas_price_per_unit: f64,
+    pub gaskiller_gas_estimate: u64,
     pub gaskiller_estimated_gas_cost: f64,
     pub gas_savings: u64,
     pub percent_savings: f64,
