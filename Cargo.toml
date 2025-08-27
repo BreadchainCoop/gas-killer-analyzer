@@ -30,7 +30,6 @@ csv = "1.3.1"
 serde_derive = "1.0.219"
 serde = "1.0.219"
 chrono = { version = "0.4.41", features = ["clock", "serde"] }
-reqwest = { version = "0.11", features = ["json"] }
 foundry-evm-traces = { git = "https://github.com/foundry-rs/foundry", package = "foundry-evm-traces", branch = "master" }
 
 
