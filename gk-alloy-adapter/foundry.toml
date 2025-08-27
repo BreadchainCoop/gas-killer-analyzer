@@ -3,7 +3,7 @@ src = "src"
 out = "out"
 libs = ["lib"]
 
-reamppings = [
+remappings = [
     "gk/=lib/gas-killer-avs-sol/src/"
 ]
 
