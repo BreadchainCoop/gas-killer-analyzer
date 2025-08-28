@@ -1,0 +1,71 @@
+name: Docker CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - staging
+  release:
+    types: [created]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags (branch/release + short sha)
+        id: vars
+        shell: bash
+        run: |
+          NAME="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          NAME="${NAME,,}"                       # lowercase owner/repo
+          SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            CHANNEL_TAG="${GITHUB_REF_NAME}"     # release tag
+          else
+            CHANNEL_TAG="${GITHUB_REF_NAME}"     # branch name
+            [[ "${CHANNEL_TAG}" == "main" ]] && CHANNEL_TAG="latest"
+          fi
+
+          echo "name=${NAME}"               >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}"     >> "$GITHUB_OUTPUT"
+          echo "channel_tag=${CHANNEL_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image (two tags)
+        shell: bash
+        run: |
+          NAME="${{ steps.vars.outputs.name }}"
+          TAG="${{ steps.vars.outputs.channel_tag }}"
+          SHORT="${{ steps.vars.outputs.short_sha }}"
+
+          echo "Building ${NAME}:${TAG} and ${NAME}:${TAG}-${SHORT}"
+          docker build \
+            --label org.opencontainers.image.revision="${GITHUB_SHA}" \
+            --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            -t "${NAME}:${TAG}" \
+            -t "${NAME}:${TAG}-${SHORT}" \
+            .
+
+      - name: Push image tags
+        shell: bash
+        run: |
+          NAME="${{ steps.vars.outputs.name }}"
+          TAG="${{ steps.vars.outputs.channel_tag }}"
+          SHORT="${{ steps.vars.outputs.short_sha }}"
+
+          docker push "${NAME}:${TAG}"
+          docker push "${NAME}:${TAG}-${SHORT}"
+
