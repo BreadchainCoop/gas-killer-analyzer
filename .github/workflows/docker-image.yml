@@ -33,12 +33,8 @@ jobs:
           NAME="${NAME,,}"                       # lowercase owner/repo
           SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-7)"
 
-          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
-            CHANNEL_TAG="${GITHUB_REF_NAME}"     # release tag
-          else
-            CHANNEL_TAG="${GITHUB_REF_NAME}"     # branch name
-            [[ "${CHANNEL_TAG}" == "main" ]] && CHANNEL_TAG="latest"
-          fi
+          CHANNEL_TAG="${GITHUB_REF_NAME}"
+          [[ "${GITHUB_EVENT_NAME}" != "release" && "$CHANNEL_TAG" == "main" ]] && CHANNEL_TAG="latest"
 
           echo "name=${NAME}"               >> "$GITHUB_OUTPUT"
           echo "short_sha=${SHORT_SHA}"     >> "$GITHUB_OUTPUT"
