@@ -5,6 +5,7 @@ use clap_derive::{Parser, Subcommand};
 use gas_analyzer_rs::commands;
 use std::env;
 use std::path::PathBuf;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use url::Url;
 
 pub struct Config {
@@ -29,6 +30,15 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                "gas_analyzer_rs=info".into()
+            }),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let out_path = env::var("OUT_PATH").map(PathBuf::from).unwrap_or_else(|_| {
         let mut default_path = PathBuf::new();
         default_path.push(".");

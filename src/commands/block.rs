@@ -23,6 +23,7 @@ use alloy_rpc_types::{
 };
 use anyhow::{Error as AnyhowError, Result, anyhow};
 use futures::{StreamExt, TryStreamExt, stream};
+use tracing::{info, debug, warn};
 use url::Url;
 
 use crate::{compute_state_updates, encode_state_updates_to_abi};
@@ -43,7 +44,7 @@ pub async fn run(block_id: BlockId) -> Result<()> {
         .get_block_number_by_id(block_id)
         .await?
         .expect("block number must be found");
-    println!("block number: {}", block_number);
+    info!("block number: {}", block_number);
     let anvil = Anvil::new()
         .args(["--order", "fifo"])
         .fork(fork_url.as_str())
@@ -78,7 +79,7 @@ pub async fn run(block_id: BlockId) -> Result<()> {
         .expect("block must be found");
     let txs = match block.transactions {
         BlockTransactions::Hashes(hashes) => {
-            println!("collecting txs from hashes...");
+            info!("collecting txs from hashes...");
             let txs = stream::iter(hashes)
                 .map(|hash| regular_provider.get_transaction_by_hash(hash))
                 .buffer_unordered(4)
@@ -87,13 +88,13 @@ pub async fn run(block_id: BlockId) -> Result<()> {
                 .into_iter()
                 .filter_map(|tx| tx) // TODO: should not accept None
                 .collect::<Vec<_>>();
-            println!("done!");
+            info!("done collecting txs from hashes");
             txs
         }
         BlockTransactions::Full(txs) => txs,
         BlockTransactions::Uncle => panic!("wtf do I do with an uncle?"),
     };
-    println!("preparing txs...");
+    info!("preparing txs...");
     let txs = stream::iter(txs)
         .map(|tx| prepare_tx(&regular_provider, tx))
         .buffer_unordered(4)
@@ -102,11 +103,11 @@ pub async fn run(block_id: BlockId) -> Result<()> {
         .into_iter()
         .filter_map(|tx| tx)
         .collect::<Vec<_>>();
-    println!("done!");
+    info!("done preparing txs");
 
     let mut stepped_smart_contracts = HashSet::new();
     let mut tx_hashes = Vec::new();
-    println!("sending txs...");
+    info!("sending txs...");
     for tx in txs {
         match queue_tx_for_next_block(
             tx,
@@ -124,13 +125,13 @@ pub async fn run(block_id: BlockId) -> Result<()> {
         }
     }
 
-    println!("mining block...");
+    info!("mining block...");
     forked_provider.anvil_mine(Some(1), None).await?;
     let block = forked_provider
         .get_block_by_number(alloy_eips::BlockNumberOrTag::Latest)
         .await?
         .expect("block must be found");
-    println!("block: {:?}", block);
+    debug!("block: {:?}", block);
 
     Ok(())
 }
@@ -149,7 +150,6 @@ enum QueueTxError {
     RegisterError(PendingTransactionError),
 }
 
-// TODO: replace all printlns with tracing logs
 async fn queue_tx_for_next_block(
     tx: TxData,
     forked_provider: &impl Provider,
@@ -171,21 +171,21 @@ async fn queue_tx_for_next_block(
     let tx_request = match tx.tx_kind_data {
         TxKindData::SmartContract { to, code, .. } => {
             if !stepped_smart_contracts.contains(&to) {
-                println!("deploying gas estimator...");
-                println!("code_len: {:?}", code.len());
+                info!("deploying gas estimator...");
+                debug!("code_len: {:?}", code.len());
                 if code[0] == 0xEF {
-                    println!("code[0] is 0xEF, skipping");
+                    warn!("code[0] is 0xEF, skipping EOF contract");
                     return Err(QueueTxError::EOF);
                 }
                 let contract = StateChangeHandlerGasEstimator::deploy(&bin_provider, code)
                     .await
                     .map_err(QueueTxError::AlloyContract)?;
-                println!("retrieving computed gas estimator code...");
+                debug!("retrieving computed gas estimator code...");
                 let gas_estimator_code = bin_provider
                     .get_code_at(*contract.address())
                     .await
                     .map_err(QueueTxError::AlloyRpc)?;
-                println!("setting code...");
+                debug!("setting code...");
                 forked_provider
                     .anvil_set_code(to, gas_estimator_code)
                     .await
@@ -193,42 +193,42 @@ async fn queue_tx_for_next_block(
                 stepped_smart_contracts.insert(to);
             }
 
-            println!("getting trace...");
+            debug!("getting trace...");
             let trace = get_tx_trace(&forked_provider, tx.tx.inner.hash().to_owned())
                 .await
                 .map_err(QueueTxError::AlloyRpc)?;
             let GethTrace::Default(trace) = trace else {
                 return Err(QueueTxError::BadTrace(trace));
             };
-            println!("computing state updates...");
+            debug!("computing state updates...");
             let (state_updates, _skipped_opcodes) = compute_state_updates(trace)
                 .await
                 .map_err(QueueTxError::ComputeStateUpdates)?;
-            println!("encoding state updates...");
+            debug!("encoding state updates...");
             let state_updates_abi = encode_state_updates_to_abi(&state_updates);
-            println!("done!");
+            debug!("done encoding state updates");
 
             let tx_request = tx_request.with_to(to).with_input(state_updates_abi);
             let tx_request = add_tx_type_data(tx_request, tx.typed_transaction_data);
             tx_request
         }
         TxKindData::Transfer { to } => {
-            println!("transfer tx...");
+            debug!("processing transfer tx...");
             let tx_request = tx_request.with_to(to);
             let tx_request = add_tx_type_data(tx_request, tx.typed_transaction_data);
             tx_request
         }
         TxKindData::SmartContractCreation { init_code, .. } => {
-            println!("smart contract creation tx...");
+            debug!("processing smart contract creation tx...");
             let tx_request = tx_request.with_input(init_code);
             let tx_request = add_tx_type_data(tx_request, tx.typed_transaction_data);
             tx_request
         }
     };
 
-    println!("sending tx...");
-    println!("tx hash: {:?}", tx.receipt.transaction_hash);
-    println!("tx request: {:?}", tx_request);
+    debug!("sending tx...");
+    debug!("tx hash: {:?}", tx.receipt.transaction_hash);
+    debug!("tx request: {:?}", tx_request);
     forked_provider
         .send_transaction(tx_request)
         .await
