@@ -1756,6 +1756,7 @@ dependencies = [
  "csv",
  "dotenv",
  "env",
+ "futures",
  "serde",
  "serde_derive",
  "serde_json",
