@@ -320,7 +320,7 @@ pub async fn gas_estimate_tx(
     let receipt = provider
         .get_transaction_receipt(tx_hash)
         .await?
-        .ok_or_else(|| anyhow!("could not get receipt for tx 0x{}", tx_hash))?;
+        .ok_or_else(|| anyhow!("could not get receipt for tx {}", tx_hash))?;
     let smart_contract_tx = invokes_smart_contract(&provider, &receipt).await?;
     if receipt.gas_used <= TURETZKY_UPPER_GAS_LIMIT
         || !smart_contract_tx
@@ -358,7 +358,7 @@ pub async fn gaskiller_reporter(
     let transaction = provider
         .get_transaction_by_hash(tx_hash)
         .await?
-        .ok_or_else(|| anyhow!("could not get receipt for tx 0x{}", tx_hash))?;
+        .ok_or_else(|| anyhow!("could not get receipt for tx {}", tx_hash))?;
     let trace = get_tx_trace(&provider, tx_hash).await?;
     let (state_updates, opcodes) = compute_state_updates(trace).await?;
     let skipped_opcodes = opcodes.into_iter().collect::<Vec<_>>().join(", ");
@@ -415,10 +415,7 @@ mod tests {
     use std::fs::File;
 
     use super::*;
-    use alloy::{
-        hex,
-        primitives::{U256, address, b256, bytes},
-    };
+    use alloy::primitives::{U256, address, b256, bytes};
     use constants::*;
     use csv::Writer;
     use sol_types::SimpleStorage;
@@ -430,13 +427,9 @@ mod tests {
         let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-
-        let hash = "0x0df13f90b94773887709ce26216928c952e2d7f6d5af44198504ac6899fc5165";
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
-        let bytes: [u8; 32] =
-            hex::const_decode_to_array(hash.as_bytes()).expect("failed to decode transaction hash");
         let gk = GasKillerDefault::new(rpc_url, None).await?;
-        let report = gas_estimate_tx(provider, bytes.into(), &gk).await?;
+        let report = gas_estimate_tx(provider, SIMPLE_ARRAY_ITERATION_TX_HASH, &gk).await?;
 
         let _ = File::create("test.csv")?;
         let mut writer = Writer::from_path("test.csv")?;
@@ -450,8 +443,8 @@ mod tests {
     async fn test_estimate_state_changes_gas_set() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url: Url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
 
@@ -471,8 +464,8 @@ mod tests {
     async fn test_estimate_state_changes_gas_access_control() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url: Url = std::env::var("RPC_URL")
+            .expect("TESRPC_URLTNET_RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
 
@@ -492,8 +485,8 @@ mod tests {
     async fn test_estimate_state_changes_gas_access_control_failure() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url: Url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
 
@@ -521,8 +514,8 @@ mod tests {
     async fn test_compute_state_updates_set() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -564,8 +557,8 @@ mod tests {
     async fn test_compute_state_updates_deposit() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -611,8 +604,8 @@ mod tests {
     async fn test_compute_state_updates_delegatecall() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -676,8 +669,8 @@ mod tests {
     async fn test_compute_state_updates_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -705,8 +698,8 @@ mod tests {
     async fn test_compute_state_update_simulate_call() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url: Url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
 
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
