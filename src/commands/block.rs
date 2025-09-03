@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 // IDEA: save all txs from a block to a json, so I could do js quesries like "get all txs that either have X address as sender or receiver"
 
@@ -7,7 +7,7 @@ use alloy::{
     contract::Error as ContractError,
     network::{TransactionBuilder, TransactionBuilder7702},
     node_bindings::Anvil,
-    primitives::{Address, Bytes, FixedBytes, TxKind, U256},
+    primitives::{Address, Bytes, FixedBytes, TxKind, U256, TxHash},
     signers::local::PrivateKeySigner,
     sol,
     transports::{RpcError, TransportErrorKind},
@@ -107,8 +107,10 @@ pub async fn run(block_id: BlockId) -> Result<()> {
 
     let mut stepped_smart_contracts = HashSet::new();
     let mut tx_hashes = Vec::new();
+    let mut failed_tx_errors: HashMap<TxHash, QueueTxError> = HashMap::new();
     info!("sending txs...");
     for tx in txs {
+        let tx_hash = tx.receipt.transaction_hash;
         match queue_tx_for_next_block(
             tx,
             &forked_provider,
@@ -120,7 +122,8 @@ pub async fn run(block_id: BlockId) -> Result<()> {
             Err(QueueTxError::EOF) => (),
             Err(QueueTxError::Eip7702) => (),
             Err(e) => {
-                panic!("error: {:?}", e);
+                warn!("Failed to process transaction {}: {:?}", tx_hash, e);
+                failed_tx_errors.insert(tx_hash, e);
             }
         }
     }
@@ -132,6 +135,15 @@ pub async fn run(block_id: BlockId) -> Result<()> {
         .await?
         .expect("block must be found");
     debug!("block: {:?}", block);
+
+    if !failed_tx_errors.is_empty() {
+        warn!("Block processing completed with {} failed transactions:", failed_tx_errors.len());
+        for (tx_hash, error) in &failed_tx_errors {
+            warn!("  Transaction {}: {:?}", tx_hash, error);
+        }
+    } else {
+        info!("Block processing completed successfully with no transaction failures");
+    }
 
     Ok(())
 }
