@@ -171,7 +171,7 @@ async fn queue_tx_for_next_block(
     let tx_request = match tx.tx_kind_data {
         TxKindData::SmartContract { to, code, .. } => {
             if !stepped_smart_contracts.contains(&to) {
-                info!("deploying gas estimator...");
+                debug!("deploying gas estimator...");
                 debug!("code_len: {:?}", code.len());
                 if code[0] == 0xEF {
                     warn!("code[0] is 0xEF, skipping EOF contract");
@@ -226,8 +226,8 @@ async fn queue_tx_for_next_block(
         }
     };
 
-    debug!("sending tx...");
-    debug!("tx hash: {:?}", tx.receipt.transaction_hash);
+    info!("sending tx...");
+    info!("tx hash: {:?}", tx.receipt.transaction_hash);
     debug!("tx request: {:?}", tx_request);
     forked_provider
         .send_transaction(tx_request)
