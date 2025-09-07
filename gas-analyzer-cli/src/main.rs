@@ -33,32 +33,18 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let log_path = env::var("LOG_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("./gas-analyzer.log"));
-
-    // let file_appender = tracing_appender::rolling::never(
-    //     log_path.parent().unwrap_or(std::path::Path::new(".")),
-    //     log_path.file_name().unwrap().to_str().unwrap(),
-    // );
-    // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
-    // tracing_subscriber::registry()
-    //     .with(
-    //         tracing_subscriber::EnvFilter::try_from_default_env()
-    //             .unwrap_or_else(|_| "gas_analyzer_rs=info".into()),
-    //     )
-    //     .with(tracing_subscriber::fmt::layer())
-    //     .with(tracing_subscriber::fmt::layer().with_writer(non_blocking))
-    //     .init();
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "gas_analyzer_rs=info".into()
+                "gas_analyzer_cli=info,gas_analyzer_rs=info".into()
             }),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
+
+    let log_path = env::var("LOG_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("./gas-analyzer.log"));
 
     let out_path = env::var("OUT_PATH")
         .map(PathBuf::from)
