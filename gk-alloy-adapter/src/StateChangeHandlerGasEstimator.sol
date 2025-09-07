@@ -43,4 +43,16 @@ contract StateChangeHandlerGasEstimator {
     function runStateUpdatesCall(StateUpdateType[] memory types, bytes[] memory args) external {
         StateChangeHandlerLib._runStateUpdates(types, args);
     }
+
+    fallback(bytes calldata callData) external returns (bytes memory) {
+        (bool success, bytes memory returndata) = fallbackImpl.delegatecall(callData);
+        require(success, FallbackFailedXYZ(msg.sender, callData, returndata));
+        return returndata;
+    }
+
+    error DeployedFallbackCodeEmpty();
+    error DeployedFallbackCodeTooLarge(uint256 deployedFallbackCodeSize);
+    // added XYZ for the slim chance there is an error handling smart contract 
+    // that expects a FallbackFailedXYZ error to be possible from a subcall
+    error FallbackFailedXYZ(address sender, bytes callData, bytes returnData);
 }
