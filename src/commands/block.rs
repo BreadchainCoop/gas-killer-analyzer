@@ -17,16 +17,18 @@ use alloy_provider::{
     PendingTransaction, PendingTransactionError, Provider, ProviderBuilder,
     ext::{AnvilApi, DebugApi},
 };
+use alloy::network::ReceiptResponse;
 use alloy_rpc_types::{
     AccessList, BlockTransactions, Transaction, TransactionReceipt, TransactionRequest,
     trace::geth::{GethDebugTracingOptions, GethDefaultTracingOptions, GethTrace},
 };
+use alloy_sol_types::SolCall;
 use anyhow::{Error as AnyhowError, Result, anyhow};
 use futures::{StreamExt, TryStreamExt, stream};
 use tracing::{info, debug, warn};
 use url::Url;
 
-use crate::{compute_state_updates, encode_state_updates_to_abi};
+use crate::{compute_state_updates, encode_state_updates_to_sol};
 
 sol!(
     #[sol(rpc)]
@@ -103,6 +105,7 @@ pub async fn run(block_id: BlockId) -> Result<()> {
         .into_iter()
         .filter_map(|tx| tx)
         .collect::<Vec<_>>();
+    let txs = txs.into_iter().take(10).collect::<Vec<_>>();
     info!("done preparing txs");
 
     let mut stepped_smart_contracts = HashSet::new();
@@ -118,7 +121,7 @@ pub async fn run(block_id: BlockId) -> Result<()> {
             &mut stepped_smart_contracts,
         )
         .await {
-            Ok(tx) => tx_hashes.push(tx),
+            Ok(tx) => tx_hashes.push((tx_hash, tx)),
             Err(QueueTxError::EOF) => (),
             Err(QueueTxError::Eip7702) => (),
             Err(e) => {
@@ -136,13 +139,54 @@ pub async fn run(block_id: BlockId) -> Result<()> {
         .expect("block must be found");
     debug!("block: {:?}", block);
 
-    if !failed_tx_errors.is_empty() {
-        warn!("Block processing completed with {} failed transactions:", failed_tx_errors.len());
-        for (tx_hash, error) in &failed_tx_errors {
-            warn!("  Transaction {}: {:?}", tx_hash, error);
+    info!("awaiting {} pending transactions...", tx_hashes.len());
+    let mut successful_tx_results = Vec::new();
+    let mut failed_tx_results: HashMap<TxHash, String> = HashMap::new();
+    
+    for (og_tx_hash, pending_tx) in tx_hashes {
+        let tx_hash = *pending_tx.tx_hash();
+        match pending_tx.await {
+            Ok(confirmed_tx_hash) => {
+                match forked_provider.get_transaction_receipt(confirmed_tx_hash).await {
+                    Ok(Some(receipt)) => {
+                        info!("Transaction {} succeeded: status={:?}, gas_used={:?}", 
+                              og_tx_hash, receipt.status(), receipt.gas_used());
+                        successful_tx_results.push(receipt);
+                    }
+                    Ok(None) => {
+                        warn!("Transaction {} completed but receipt not found", tx_hash);
+                        failed_tx_results.insert(tx_hash, "Receipt not found".to_string());
+                    }
+                    Err(e) => {
+                        warn!("Transaction {} completed but failed to get receipt: {:?}", tx_hash, e);
+                        failed_tx_results.insert(tx_hash, format!("Failed to get receipt: {:?}", e));
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Transaction {} failed to complete: {:?}", tx_hash, e);
+                failed_tx_results.insert(tx_hash, format!("{:?}", e));
+            }
         }
-    } else {
-        info!("Block processing completed successfully with no transaction failures");
+    }
+
+    info!("Transaction results summary:");
+    info!("  Successful transactions: {}", successful_tx_results.len());
+    info!("  Failed during processing: {}", failed_tx_errors.len());
+    info!("  Failed during execution: {}", failed_tx_results.len());
+    
+    if !failed_tx_errors.is_empty() {
+        warn!("Transactions that failed during processing:");
+        for (tx_hash, error) in &failed_tx_errors {
+            warn!("  {}: {:?}", tx_hash, error);
+        }
+    }
+    
+    if !failed_tx_results.is_empty() {
+        warn!("Transactions that failed during execution:");
+        for (tx_hash, error) in &failed_tx_results {
+            warn!("  {}: {}", tx_hash, error);
+        }
     }
 
     Ok(())
@@ -217,10 +261,14 @@ async fn queue_tx_for_next_block(
                 .await
                 .map_err(QueueTxError::ComputeStateUpdates)?;
             debug!("encoding state updates...");
-            let state_updates_abi = encode_state_updates_to_abi(&state_updates);
+            let (types, args) = encode_state_updates_to_sol(&state_updates);
+            let run_state_updates_call  =StateChangeHandlerGasEstimator::runStateUpdatesCallCall { 
+                types: types.into_iter().map(|x| x as u8).collect::<Vec<_>>(),
+                args: args.into_iter().map(|x| x.into()).collect::<Vec<_>>(),
+            };
             debug!("done encoding state updates");
 
-            let tx_request = tx_request.with_to(to).with_input(state_updates_abi);
+            let tx_request = tx_request.with_to(to).with_input(run_state_updates_call.abi_encode());
             let tx_request = add_tx_type_data(tx_request, tx.typed_transaction_data);
             tx_request
         }
