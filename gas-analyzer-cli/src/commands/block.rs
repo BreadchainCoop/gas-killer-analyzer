@@ -25,10 +25,12 @@ use alloy_rpc_types::{
 use alloy_sol_types::SolCall;
 use anyhow::{Error as AnyhowError, Result, anyhow};
 use futures::{StreamExt, TryStreamExt, stream};
+use serde::Serialize;
 use tracing::{info, debug, warn};
 use url::Url;
 
-use crate::{compute_state_updates, encode_state_updates_to_sol};
+use gas_analyzer_rs::{compute_state_updates, encode_state_updates_to_sol};
+use crate::Config;
 
 sol!(
     #[sol(rpc)]
@@ -36,11 +38,48 @@ sol!(
     "res/abi/StateChangeHandlerGasEstimator.json"
 );
 
-pub async fn run(block_id: BlockId) -> Result<()> {
-    let fork_url: Url = env::var("FORK_URL")
-        .expect("FORK_URL must be set")
-        .parse()
-        .expect("FORK_URL must be a valid URL");
+#[derive(Serialize)]
+struct BlockResult {
+    successful_tx_results: Vec<TransactionResult>,
+    failed_tx_results: Vec<TransactionFailure>,
+    failed_tx_errors: HashMap<TxHash, QueueTxError>,
+}
+
+#[derive(Serialize)]
+struct TransactionResult {
+    og_tx_hash: TxHash,
+    simulation_tx_hash: TxHash,
+    gas_used: u64,
+    status: bool,
+}
+
+#[derive(Serialize)]
+struct TransactionFailure {
+    og_tx_hash: TxHash,
+    simulation_tx_hash: TxHash,
+    error: String,
+}
+
+struct QueuedTx {
+    og_tx_hash: TxHash,
+    pending_tx: PendingTransaction,
+}
+
+pub async fn run(block_id: BlockId, config: Config) -> Result<()> {
+    info!("Processing block {:?}, output will be saved to {:?}, logs are saved to {:?}", 
+        block_id,
+        config.out_path,
+        config.log_path,
+    );
+    let block_result = process_block(block_id, config.fork_url).await?;
+    let out_file = std::fs::File::create(&config.out_path)?;
+    serde_json::to_writer_pretty(out_file, &block_result)?;
+    info!("results saved to {:?}", config.out_path);
+
+    Ok(())
+}
+
+async fn process_block(block_id: BlockId, fork_url: Url) -> Result<BlockResult> {
     let regular_provider = ProviderBuilder::new().connect_http(fork_url.clone());
     let block_number = regular_provider
         .get_block_number_by_id(block_id)
@@ -105,11 +144,10 @@ pub async fn run(block_id: BlockId) -> Result<()> {
         .into_iter()
         .filter_map(|tx| tx)
         .collect::<Vec<_>>();
-    let txs = txs.into_iter().take(10).collect::<Vec<_>>();
     info!("done preparing txs");
 
     let mut stepped_smart_contracts = HashSet::new();
-    let mut tx_hashes = Vec::new();
+    let mut queued_txs = Vec::new();
     let mut failed_tx_errors: HashMap<TxHash, QueueTxError> = HashMap::new();
     info!("sending txs...");
     for tx in txs {
@@ -121,11 +159,11 @@ pub async fn run(block_id: BlockId) -> Result<()> {
             &mut stepped_smart_contracts,
         )
         .await {
-            Ok(tx) => tx_hashes.push((tx_hash, tx)),
-            Err(QueueTxError::EOF) => (),
-            Err(QueueTxError::Eip7702) => (),
+            Ok(tx) => queued_txs.push(QueuedTx { og_tx_hash: tx_hash, pending_tx: tx }),
+            Err(QueueTxError::EOF) => warn!("EOF contract, skipping"),
+            Err(QueueTxError::Eip7702) => warn!("EIP-7702 transaction, skipping"),
             Err(e) => {
-                warn!("Failed to process transaction {}: {:?}", tx_hash, e);
+                warn!("Skipping. Failed to process transaction {}: {:?}", tx_hash, e);
                 failed_tx_errors.insert(tx_hash, e);
             }
         }
@@ -139,33 +177,50 @@ pub async fn run(block_id: BlockId) -> Result<()> {
         .expect("block must be found");
     debug!("block: {:?}", block);
 
-    info!("awaiting {} pending transactions...", tx_hashes.len());
+    info!("awaiting {} pending transactions...", queued_txs.len());
     let mut successful_tx_results = Vec::new();
-    let mut failed_tx_results: HashMap<TxHash, String> = HashMap::new();
+    let mut failed_tx_results = Vec::new();
     
-    for (og_tx_hash, pending_tx) in tx_hashes {
-        let tx_hash = *pending_tx.tx_hash();
-        match pending_tx.await {
-            Ok(confirmed_tx_hash) => {
-                match forked_provider.get_transaction_receipt(confirmed_tx_hash).await {
+    for queued_tx in queued_txs {
+        let predetermined_tx_hash = *queued_tx.pending_tx.tx_hash();
+        match queued_tx.pending_tx.await {
+            Ok(tx_hash) => {
+                match forked_provider.get_transaction_receipt(tx_hash).await {
                     Ok(Some(receipt)) => {
                         info!("Transaction {} succeeded: status={:?}, gas_used={:?}", 
-                              og_tx_hash, receipt.status(), receipt.gas_used());
-                        successful_tx_results.push(receipt);
+                              tx_hash, receipt.status(), receipt.gas_used());
+                        successful_tx_results.push(TransactionResult {
+                            og_tx_hash: queued_tx.og_tx_hash,
+                            simulation_tx_hash: tx_hash,
+                            gas_used: receipt.gas_used(),
+                            status: receipt.status(),
+                        });
                     }
                     Ok(None) => {
                         warn!("Transaction {} completed but receipt not found", tx_hash);
-                        failed_tx_results.insert(tx_hash, "Receipt not found".to_string());
+                        failed_tx_results.push(TransactionFailure {
+                            og_tx_hash: queued_tx.og_tx_hash,
+                            simulation_tx_hash: tx_hash,
+                            error: "Receipt not found".to_string(),
+                        });
                     }
                     Err(e) => {
                         warn!("Transaction {} completed but failed to get receipt: {:?}", tx_hash, e);
-                        failed_tx_results.insert(tx_hash, format!("Failed to get receipt: {:?}", e));
+                        failed_tx_results.push(TransactionFailure {
+                            og_tx_hash: queued_tx.og_tx_hash,
+                            simulation_tx_hash: tx_hash,
+                            error: format!("Failed to get receipt: {:?}", e),
+                        });
                     }
                 }
             }
             Err(e) => {
-                warn!("Transaction {} failed to complete: {:?}", tx_hash, e);
-                failed_tx_results.insert(tx_hash, format!("{:?}", e));
+                warn!("Transaction {} failed to complete: {:?}", queued_tx.og_tx_hash, e);
+                failed_tx_results.push(TransactionFailure {
+                    og_tx_hash: queued_tx.og_tx_hash,
+                    simulation_tx_hash: predetermined_tx_hash,
+                    error: format!("{:?}", e),
+                });
             }
         }
     }
@@ -184,26 +239,44 @@ pub async fn run(block_id: BlockId) -> Result<()> {
     
     if !failed_tx_results.is_empty() {
         warn!("Transactions that failed during execution:");
-        for (tx_hash, error) in &failed_tx_results {
-            warn!("  {}: {}", tx_hash, error);
+        for failure in &failed_tx_results {
+            warn!("  {}: {}", failure.og_tx_hash, failure.error);
         }
     }
 
-    Ok(())
+    Ok(BlockResult {
+        successful_tx_results,
+        failed_tx_results,
+        failed_tx_errors,
+    })
 }
 
-#[derive(Debug)]
+// TODO: eventually have better serialization for errors
+#[derive(Debug, Serialize)]
 enum QueueTxError {
+    #[serde(serialize_with = "serde_to_string")]
     AlloyContract(ContractError),
+    #[serde(serialize_with = "serde_to_string")]
     AlloyRpc(RpcError<TransportErrorKind>),
+    #[serde(serialize_with = "serde_to_string")]
     BadTrace(GethTrace),
     // TODO: It's not ideal we use Anyhow errors for everything
     // it was a reasonable design decision at the time of hacking gas analyzer together
     // but now it's a pain to deal with
+    #[serde(serialize_with = "serde_to_string")]
     ComputeStateUpdates(AnyhowError),
     Eip7702,
     EOF,
+    #[serde(serialize_with = "serde_to_string")]
     RegisterError(PendingTransactionError),
+}
+
+fn serde_to_string<T, S>(err: &T, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+    T: std::fmt::Debug,
+{
+    serializer.serialize_str(&format!("{:?}", err))
 }
 
 async fn queue_tx_for_next_block(
@@ -262,7 +335,7 @@ async fn queue_tx_for_next_block(
                 .map_err(QueueTxError::ComputeStateUpdates)?;
             debug!("encoding state updates...");
             let (types, args) = encode_state_updates_to_sol(&state_updates);
-            let run_state_updates_call  =StateChangeHandlerGasEstimator::runStateUpdatesCallCall { 
+            let run_state_updates_call = StateChangeHandlerGasEstimator::runStateUpdatesCallCall { 
                 types: types.into_iter().map(|x| x as u8).collect::<Vec<_>>(),
                 args: args.into_iter().map(|x| x.into()).collect::<Vec<_>>(),
             };

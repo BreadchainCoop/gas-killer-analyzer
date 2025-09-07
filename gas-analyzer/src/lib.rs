@@ -1,13 +1,12 @@
-pub mod commands;
-// pub mod gk;
 pub mod sol_types;
+// TODO: remove structs, only used for Opcode
 pub mod structs;
 
 use std::{collections::HashSet, str::FromStr};
 use structs::Opcode;
 
 use alloy::{
-    primitives::{Address, Bytes, FixedBytes, TxKind},
+    primitives::{Address, Bytes, FixedBytes},
     providers::{Provider, ProviderBuilder, ext::DebugApi},
     rpc::types::{
         TransactionReceipt,
@@ -52,16 +51,16 @@ pub fn append_to_state_updates(
     stack.reverse();
     let memory = match struct_log.memory {
         Some(memory) => parse_trace_memory(memory),
-        None => match struct_log.op.as_str() {
+        None => match struct_log.op.as_ref() {
             "CALL" | "LOG0" | "LOG1" | "LOG2" | "LOG3" | "LOG4" if struct_log.depth == 1 => {
                 bail!("There is no memory for {:?} in depth 1", struct_log.op)
             }
             _ => return Ok(None),
         },
     };
-    match struct_log.op.as_str() {
+    match struct_log.op.as_ref() {
         "CREATE" | "CREATE2" | "SELFDESTRUCT" => {
-            return Ok(Some(struct_log.op));
+            return Ok(Some(struct_log.op.to_string()));
         }
         "DELEGATECALL" | "CALLCODE" => {
             bail!(
@@ -152,7 +151,7 @@ pub async fn compute_state_updates(
         } else if struct_log.depth == target_depth {
             // If we're going to step into a new execution context, increase the target depth
             // else, try to add the state update
-            if struct_log.op.as_str() == "DELEGATECALL" || struct_log.op.as_str() == "CALLCODE" {
+            if struct_log.op.as_ref() == "DELEGATECALL" || struct_log.op.as_ref() == "CALLCODE" {
                 target_depth = struct_log.depth + 1;
             } else if let Some(opcode) = append_to_state_updates(&mut state_updates, struct_log)? {
                 skipped_opcodes.insert(opcode);
@@ -200,7 +199,7 @@ pub async fn get_trace_from_call(
     get_tx_trace(&provider, tx_hash).await
 }
 
-fn encode_state_updates_to_sol(
+pub fn encode_state_updates_to_sol(
     state_updates: &[StateUpdate],
 ) -> (Vec<StateUpdateType>, Vec<Bytes>) {
     let state_update_types: Vec<StateUpdateType> = state_updates
