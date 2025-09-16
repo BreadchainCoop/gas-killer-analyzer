@@ -78,13 +78,12 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
                 }
             };
 
-            let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+            let provider = ProviderBuilder::new().connect(rpc_url.as_str()).await?;
             println!("generating gaskiller reports...");
 
             let (reports, _) = gas_estimate_block(provider, identifier, gk).await?;
             println!("fetched reports");
-            let output_file = std::env::var("OUTPUT_FILE")
-        .expect("OUTPUT_FILE must be set");
+            let output_file = std::env::var("OUTPUT_FILE").expect("OUTPUT_FILE must be set");
             let path = Path::new(output_file.as_str());
 
             let exists = path::Path::exists(path);
@@ -100,15 +99,13 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
             }
             writer.flush()?;
             println!("successfully wrote data to {output_file}");
-
         }
         Some(Commands::Transaction(hash)) => {
-            let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
-             let bytes: [u8; 32] = hex::const_decode_to_array(hash.as_bytes())
+            let provider = ProviderBuilder::new().connect(rpc_url.as_str()).await?;
+            let bytes: [u8; 32] = hex::const_decode_to_array(hash.as_bytes())
                 .expect("failed to decode transaction hash");
             let report = gas_estimate_tx(provider, bytes.into(), &gk).await?;
-              let output_file = std::env::var("OUTPUT_FILE")
-                .expect("OUTPUT_FILE must be set");
+            let output_file = std::env::var("OUTPUT_FILE").expect("OUTPUT_FILE must be set");
             let path = Path::new(output_file.as_str());
 
             let exists = path::Path::exists(path);

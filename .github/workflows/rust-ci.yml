@@ -1,0 +1,40 @@
+name: Rust
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+  TESTNET_RPC_URL: https://compatible-floral-sponge.ethereum-holesky.quiknode.pro/5208c2ae65694338de5f5a883442970cf04fefe0
+  RPC_URL: https://withered-convincing-meadow.quiknode.pro/89fd706450ed0a8279f87c01e52ae78d9b308ce7/
+
+jobs:
+  check:
+    name: Format, Clippy, Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo builds
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy (deny warnings)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: cargo check (all targets)
+        run: cargo check --all-targets --all-features
+
+      - name: cargo test (all targets)
+        run: cargo test --verbose

@@ -2,7 +2,7 @@ use crate::sol_types::StateUpdate;
 use alloy::{
     network::EthereumWallet,
     node_bindings::{Anvil, AnvilInstance},
-    primitives::{U256, Address, Bytes},
+    primitives::{Address, Bytes, U256},
     providers::{
         Identity, ProviderBuilder, RootProvider,
         fillers::{
@@ -48,7 +48,8 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
         let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
         let provider = ProviderBuilder::new()
             .wallet(signer)
-            .connect_http(anvil.endpoint_url());
+            .connect(anvil.endpoint_url().as_str())
+            .await?;
 
         let contract = StateChangeHandlerGasEstimator::deploy(provider.clone()).await?;
         // Alloy's sol macro generates a BYTECODE and DEPLOYED_BYTECODE fields for contracts,
@@ -75,8 +76,10 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
         let target_contract = StateChangeHandlerGasEstimator::new(contract_address, &self.provider);
 
         self.provider
-            .anvil_set_balance
-            (contract_address, U256::from(100000000000000000000000000000u128))
+            .anvil_set_balance(
+                contract_address,
+                U256::from(100000000000000000000000000000u128),
+            )
             .await?;
 
         let (types, args) = crate::encode_state_updates_to_sol(state_updates);
