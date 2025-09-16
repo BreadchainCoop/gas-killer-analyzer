@@ -168,11 +168,11 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
 
         // NOTE: signature identification removed for Alloy 0.12.6 + dependency constraints
         // TODO: possible to parallelize requests to signatures_identifier
-        let revert_selector = reverting_context
+        let _revert_selector = reverting_context
             .revertData
             .get(0..4)
             .map(|bytes| Selector::try_from(bytes).unwrap());
-        let error: Option<(String, Vec<u8>)> = None;
+        let _error: Option<(String, Vec<u8>)> = None;
 
         let function: Option<(String, Vec<u8>)> = None;
         let target = reverting_context.target;
