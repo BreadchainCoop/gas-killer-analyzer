@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
     let tx_hash: FixedBytes<32> = tx_hash_str.parse()?;
 
     // Create extractor from RPC URL
-    let extractor = from_rpc_url(&rpc_url)?;
+    let extractor = from_rpc_url(&rpc_url).await?;
 
     // Extract state updates with metadata
     match extractor.extract_with_metadata(tx_hash).await {

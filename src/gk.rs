@@ -1,7 +1,6 @@
 use crate::sol_types::{RevertingContext, StateUpdate};
 use alloy::{
     contract,
-    dyn_abi::DynSolValue,
     hex,
     network::EthereumWallet,
     node_bindings::{Anvil, AnvilInstance},
@@ -13,18 +12,16 @@ use alloy::{
             WalletFiller,
         },
     },
+    // enable json-rpc feature in Cargo.toml for ErrorPayload
     rpc::json_rpc::ErrorPayload,
     signers::local::PrivateKeySigner,
     sol,
     sol_types::SolError,
     transports::RpcError,
 };
-use alloy_dyn_abi::{ErrorExt, JsonAbiExt};
 use alloy_provider::{Provider, ext::AnvilApi};
 use anyhow::{Context, Error, Result, anyhow, bail};
 use url::Url;
-
-use foundry_evm_traces::identifier::SignaturesIdentifier;
 
 sol!(
     #[sol(rpc)]
@@ -63,7 +60,8 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
         let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
         let provider = ProviderBuilder::new()
             .wallet(signer)
-            .connect_http(anvil.endpoint_url());
+            .connect(anvil.endpoint_url().as_str())
+            .await?;
 
         let contract = StateChangeHandlerGasEstimator::deploy(provider.clone()).await?;
         // Alloy's sol macro generates a BYTECODE and DEPLOYED_BYTECODE fields for contracts,
@@ -165,68 +163,32 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
     async fn process_reverting_context_error(data: &str) -> Result<anyhow::Error> {
         let reverting_context_error_hex = hex::decode(data)
             .context("something went incredibly wrong, rpc error contained invalid hex value")?;
-        let reverting_context = RevertingContext::abi_decode(&reverting_context_error_hex)
+        let reverting_context = RevertingContext::abi_decode(&reverting_context_error_hex, true)
             .context("something went incredibly wrong, RevertingContext rpc error wasn't valid abi encoded")?;
 
-        let signatures_identifier = SignaturesIdentifier::new(false).map_err(|e| anyhow!("detected RevertingContext error, but could not access SignaturesIdentifier service. error: {}", e))?;
+        // NOTE: signature identification removed for Alloy 0.12.6 + dependency constraints
         // TODO: possible to parallelize requests to signatures_identifier
         let revert_selector = reverting_context
             .revertData
             .get(0..4)
             .map(|bytes| Selector::try_from(bytes).unwrap());
-        let error = (match revert_selector {
-            Some(revert_selector) => signatures_identifier.identify_error(revert_selector).await,
-            None => None,
-        })
-        .and_then(|identified_error| {
-            match identified_error.decode_error(&reverting_context.revertData) {
-                Ok(decoded_error) => Some((identified_error, decoded_error)),
-                _ => None,
-            }
-        });
+        let error: Option<(String, Vec<u8>)> = None;
 
-        let function_selector = reverting_context
-            .callargs
-            .get(0..4)
-            .map(|bytes| Selector::try_from(bytes).unwrap());
-        let function = (match function_selector {
-            Some(function_selector) => {
-                signatures_identifier
-                    .identify_function(function_selector)
-                    .await
-            }
-            None => None,
-        })
-        .and_then(|identified_function| {
-            match identified_function.abi_decode_input(&reverting_context.callargs) {
-                Ok(decoded_input) => Some((identified_function, decoded_input)),
-                _ => None,
-            }
-        });
+        let function: Option<(String, Vec<u8>)> = None;
         let target = reverting_context.target;
         let state_update_index = reverting_context.index;
 
         let function_string = match function {
-            Some((identified_function, decoded_input)) => {
+            Some((_identified_function, decoded_input)) => {
                 format!(
-                    "{} with values ({})",
-                    identified_function.signature(),
+                    "Identified function with values ({})",
                     format_decoded_values(&decoded_input[..])
                 )
             }
             None => format!("Unrecognized function: {:?}", reverting_context.callargs),
         };
 
-        let error_string = match error {
-            Some((identified_error, decoded_error)) => {
-                format!(
-                    "{} with values ({})",
-                    identified_error.signature(),
-                    format_decoded_values(&decoded_error.body)
-                )
-            }
-            None => format!("Unrecognized error: {:?}", reverting_context.revertData),
-        };
+        let error_string = format!("Unrecognized error: {:?}", reverting_context.revertData);
 
         Ok(anyhow!(
             "Simulation subcontext reverted. State Update Index: {} Target Address: {}, Called {} Got error: {}",
@@ -238,7 +200,7 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
     }
 }
 
-fn format_decoded_values(values: &[DynSolValue]) -> String {
+fn format_decoded_values<T: core::fmt::Debug>(values: &[T]) -> String {
     values
         .iter()
         .map(|v| format!("{:?}", v))
