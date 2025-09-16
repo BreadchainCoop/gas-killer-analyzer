@@ -429,7 +429,7 @@ mod tests {
             return Ok(());
         }
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+        let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect(rpc_url.as_str()).await?;
@@ -453,7 +453,7 @@ mod tests {
             return Ok(());
         }
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+        let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect(rpc_url.as_str()).await?;
@@ -509,7 +509,7 @@ mod tests {
             return Ok(());
         }
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+        let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect(rpc_url.as_str()).await?;
@@ -538,12 +538,12 @@ mod tests {
     async fn test_compute_state_updates_set() -> Result<()> {
         dotenv::dotenv().ok();
 
-        if std::env::var("TESTNET_RPC_URL").is_err() {
+        if std::env::var("RPC_URL").is_err() {
             eprintln!("skipping test_compute_state_updates_set: set TESTNET_RPC_URL to run");
             return Ok(());
         }
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+        let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect(rpc_url.as_str()).await?;
@@ -586,12 +586,12 @@ mod tests {
     async fn test_compute_state_updates_deposit() -> Result<()> {
         dotenv::dotenv().ok();
 
-        if std::env::var("TESTNET_RPC_URL").is_err() {
+        if std::env::var("RPC_URL").is_err() {
             eprintln!("skipping test_compute_state_updates_deposit: set TESTNET_RPC_URL to run");
             return Ok(());
         }
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+        let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect(rpc_url.as_str()).await?;
@@ -638,14 +638,14 @@ mod tests {
     async fn test_compute_state_updates_delegatecall() -> Result<()> {
         dotenv::dotenv().ok();
 
-        if std::env::var("TESTNET_RPC_URL").is_err() {
+        if std::env::var("RPC_URL").is_err() {
             eprintln!(
                 "skipping test_compute_state_updates_delegatecall: set TESTNET_RPC_URL to run"
             );
             return Ok(());
         }
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+        let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect(rpc_url.as_str()).await?;
@@ -710,14 +710,14 @@ mod tests {
     async fn test_compute_state_updates_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
-        if std::env::var("TESTNET_RPC_URL").is_err() {
+        if std::env::var("RPC_URL").is_err() {
             eprintln!(
                 "skipping test_compute_state_updates_call_external: set TESTNET_RPC_URL to run"
             );
             return Ok(());
         }
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+        let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect(rpc_url.as_str()).await?;
@@ -746,14 +746,14 @@ mod tests {
     async fn test_compute_state_update_simulate_call() -> Result<()> {
         dotenv::dotenv().ok();
 
-        if std::env::var("TESTNET_RPC_URL").is_err() {
+        if std::env::var("RPC_URL").is_err() {
             eprintln!(
                 "skipping test_compute_state_update_simulate_call: set TESTNET_RPC_URL to run"
             );
             return Ok(());
         }
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
+        let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
 
