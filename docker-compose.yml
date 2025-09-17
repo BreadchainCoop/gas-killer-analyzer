@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  ethereum:
+    platform: linux/amd64
+    image: ghcr.io/breadchaincoop/ethereum:dev
+    env_file:
+      - .env
+    ports:
+      - "8545:8545"
+
+  test-runner:
+    build: .
+    env_file:
+      - .env
+    environment:
+      RPC_URL: "http://ethereum:8545" # Override RPC_URL from .env
+    volumes:
+      - .:/app # Mount the source code for faster development
+      - cargo-cache:/usr/local/cargo # Mount cargo cache for faster builds
+    depends_on:
+      - ethereum
+
+volumes:
+  cargo-cache:

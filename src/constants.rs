@@ -17,4 +17,6 @@ pub const ACCESS_CONTROL_MAIN_ADDRESS: Address =
     address!("0x1445f471F91De8d5889b52b4D20b4B907f7f8499");
 pub const ACCESS_CONTROL_MAIN_RUN_TX_HASH: FixedBytes<32> =
     b256!("0xa484bb888e8952793eb010e5ba43c4bf8cdc2aec702441df06a0b97446ada5d6");
+pub const SIMPLE_ARRAY_ITERATION_TX_HASH: FixedBytes<32> =
+    b256!("0x2b9df88d44d22702fafb832c07cd8dddd3fb8d4d5b9453d0328c5835f8adc7c1");
 pub const FAKE_ADDRESS: Address = address!("0xc76a6477c12dcb8554b1493482D85AB720b2A322");

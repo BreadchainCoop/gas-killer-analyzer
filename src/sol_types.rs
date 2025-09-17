@@ -110,6 +110,8 @@ sol! {
         uint8[] types;
         bytes[] data;
     }
+
+    error RevertingContext(uint256 index, address target, bytes revertData, bytes callargs);
 }
 
 #[allow(warnings)]

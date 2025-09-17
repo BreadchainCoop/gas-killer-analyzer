@@ -1,11 +1,12 @@
 #[allow(dead_code)]
 mod constants;
 pub mod gk;
-mod sol_types;
+pub mod sol_types;
 pub mod structs;
+pub mod tx_extractor;
 
-use std::{collections::HashSet, str::FromStr};
 use chrono::Utc;
+use std::{collections::HashSet, str::FromStr};
 use structs::{GasKillerReport, Opcode, ReportDetails};
 
 use alloy::{
@@ -20,7 +21,7 @@ use alloy::{
     },
     sol_types::SolValue,
 };
-use alloy_eips::eip1898::BlockId;
+
 use alloy_rpc_types::TransactionTrait;
 use anyhow::{Result, anyhow, bail};
 use gk::GasKillerDefault;
@@ -144,7 +145,9 @@ fn append_to_state_updates(
     Ok(None)
 }
 
-async fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpdate>, HashSet<Opcode>)> {
+pub async fn compute_state_updates(
+    trace: DefaultFrame,
+) -> Result<(Vec<StateUpdate>, HashSet<Opcode>)> {
     let mut state_updates: Vec<StateUpdate> = Vec::new();
     // depth for which we care about state updates happening in
     let mut target_depth = 1;
@@ -166,7 +169,10 @@ async fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpdate>,
     Ok((state_updates, skipped_opcodes))
 }
 
-async fn get_tx_trace<P: Provider>(provider: &P, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
+pub async fn get_tx_trace<P: Provider>(
+    provider: &P,
+    tx_hash: FixedBytes<32>,
+) -> Result<DefaultFrame> {
     let tx_receipt = provider
         .get_transaction_receipt(tx_hash)
         .await?
@@ -277,33 +283,33 @@ pub async fn invokes_smart_contract(
     }
 }
 
-
 // computes state updates and estimates for each transaction one by one, nicer for CLI
 pub async fn gas_estimate_block(
     provider: impl Provider,
-    block_id: BlockId,
+    all_receipts: Vec<TransactionReceipt>,
     gk: GasKillerDefault,
-) -> Result<(Vec<GasKillerReport>, FixedBytes<32>)> {
-    let all_receipts = provider
-        .get_block_receipts(block_id)
-        .await?
-        .expect("block receipts retrieval failed");
-    let block_hash = all_receipts[0]
-        .block_hash
-        .expect("couldn't find block hash in receipt");
-    
-    let receipts: Vec<_> = all_receipts.into_iter().filter(|x| x.gas_used > TURETZKY_UPPER_GAS_LIMIT).collect();
-    
-    println!("got {} receipts for block {}", receipts.len(), block_hash);
+) -> Result<Vec<GasKillerReport>> {
+    let block_number = all_receipts[0]
+        .block_number
+        .expect("couldn't find block number in receipt");
+    //TODO: filter out non-smart-contract tx
+    let receipts: Vec<_> = all_receipts
+        .into_iter()
+        .filter(|x| x.gas_used > TURETZKY_UPPER_GAS_LIMIT && x.to.is_some())
+        .collect();
+
+    println!("got {} receipts for block {}", receipts.len(), block_number);
     let mut reports = Vec::new();
     for receipt in receipts {
         println!("processing {}", &receipt.transaction_hash);
-        reports.push(get_report(&provider,receipt.transaction_hash, &receipt, &gk)
-                     .await
-                     .unwrap_or_else(|e| GasKillerReport::report_error(Utc::now(), &receipt, &e)));
-            println!("done");
+        reports.push(
+            get_report(&provider, receipt.transaction_hash, &receipt, &gk)
+                .await
+                .unwrap_or_else(|e| GasKillerReport::report_error(Utc::now(), &receipt, &e)),
+        );
+        println!("done");
     }
-    Ok((reports, block_hash))
+    Ok(reports)
 }
 
 pub async fn gas_estimate_tx(
@@ -311,24 +317,35 @@ pub async fn gas_estimate_tx(
     tx_hash: FixedBytes<32>,
     gk: &GasKillerDefault,
 ) -> Result<GasKillerReport> {
-    
-   let receipt = provider.get_transaction_receipt(tx_hash).await?.ok_or_else(|| anyhow!("could not get receipt for tx 0x{}", tx_hash))?;
+    let receipt = provider
+        .get_transaction_receipt(tx_hash)
+        .await?
+        .ok_or_else(|| anyhow!("could not get receipt for tx {}", tx_hash))?;
     let smart_contract_tx = invokes_smart_contract(&provider, &receipt).await?;
-    if (receipt.gas_used <= TURETZKY_UPPER_GAS_LIMIT) || !smart_contract_tx {
-        bail! ("Skipped: either gas used is less than or equal to TUGL or no smart contract calls are made")
+    if receipt.gas_used <= TURETZKY_UPPER_GAS_LIMIT
+        || !smart_contract_tx
+        || receipt.to.is_none()
+        || !receipt.status()
+    {
+        bail!(
+            "Skipped: either 1) gas used is less than or equal to TUGL or 2) no smart contract calls are made or 3) contract creation transaction or 4) transaction failed"
+        )
     }
 
     get_report(&provider, tx_hash, &receipt, gk).await
 }
 
-
-pub async fn get_report (provider: impl Provider, tx_hash: FixedBytes<32>, receipt: &TransactionReceipt, gk: &GasKillerDefault) -> Result<GasKillerReport>
-{
+pub async fn get_report(
+    provider: impl Provider,
+    tx_hash: FixedBytes<32>,
+    receipt: &TransactionReceipt,
+    gk: &GasKillerDefault,
+) -> Result<GasKillerReport> {
     let details = gaskiller_reporter(&provider, tx_hash, gk, receipt).await;
     if let Err(e) = details {
         return Ok(GasKillerReport::report_error(Utc::now(), receipt, &e));
     }
-   
+
     Ok(GasKillerReport::from(Utc::now(), receipt, details.unwrap()))
 }
 
@@ -341,15 +358,13 @@ pub async fn gaskiller_reporter(
     let transaction = provider
         .get_transaction_by_hash(tx_hash)
         .await?
-        .ok_or_else(|| anyhow!("could not get receipt for tx 0x{}", tx_hash))?;
+        .ok_or_else(|| anyhow!("could not get receipt for tx {}", tx_hash))?;
     let trace = get_tx_trace(&provider, tx_hash).await?;
     let (state_updates, opcodes) = compute_state_updates(trace).await?;
     let skipped_opcodes = opcodes.into_iter().collect::<Vec<_>>().join(", ");
     let gaskiller_gas_estimate = gk
         .estimate_state_changes_gas(
-            receipt
-                .to
-                .ok_or_else(|| anyhow!("receipt does not have to address"))?,
+            receipt.to.unwrap(), // already check if this is None in gas_estimate_tx
             &state_updates,
         )
         .await?;
@@ -365,9 +380,7 @@ pub async fn gaskiller_reporter(
         gaskiller_gas_estimate,
         gaskiller_estimated_gas_cost,
         gas_savings,
-        percent_savings: ( gas_savings*100)
-            as f64
-            / gas_used as f64,
+        percent_savings: (gas_savings * 100) as f64 / gas_used as f64,
         function_selector,
         skipped_opcodes,
     })
@@ -402,10 +415,7 @@ mod tests {
     use std::fs::File;
 
     use super::*;
-    use alloy::{
-        hex,
-        primitives::{U256, address, b256, bytes},
-    };
+    use alloy::primitives::{U256, address, b256, bytes};
     use constants::*;
     use csv::Writer;
     use sol_types::SimpleStorage;
@@ -417,13 +427,9 @@ mod tests {
         let rpc_url: Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-
-        let hash = "0x0df13f90b94773887709ce26216928c952e2d7f6d5af44198504ac6899fc5165";
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
-        let bytes: [u8; 32] =
-            hex::const_decode_to_array(hash.as_bytes()).expect("failed to decode transaction hash");
-        let gk = GasKillerDefault::new(rpc_url).await?;
-        let report = gas_estimate_tx(provider, bytes.into(), &gk).await?;
+        let gk = GasKillerDefault::new(rpc_url, None).await?;
+        let report = gas_estimate_tx(provider, SIMPLE_ARRAY_ITERATION_TX_HASH, &gk).await?;
 
         let _ = File::create("test.csv")?;
         let mut writer = Writer::from_path("test.csv")?;
@@ -437,8 +443,8 @@ mod tests {
     async fn test_estimate_state_changes_gas_set() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url: Url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
 
@@ -446,7 +452,7 @@ mod tests {
         let trace = get_tx_trace(&provider, tx_hash).await?;
         let (state_updates, _) = compute_state_updates(trace).await?;
 
-        let gk = GasKillerDefault::new(rpc_url).await?;
+        let gk = GasKillerDefault::new(rpc_url, None).await?;
         let gas_estimate = gk
             .estimate_state_changes_gas(SIMPLE_STORAGE_ADDRESS, &state_updates)
             .await?;
@@ -458,8 +464,8 @@ mod tests {
     async fn test_estimate_state_changes_gas_access_control() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url: Url = std::env::var("RPC_URL")
+            .expect("TESRPC_URLTNET_RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
 
@@ -467,7 +473,7 @@ mod tests {
         let trace = get_tx_trace(&provider, tx_hash).await?;
         let (state_updates, _) = compute_state_updates(trace).await?;
 
-        let gk = GasKillerDefault::new(rpc_url).await?;
+        let gk = GasKillerDefault::new(rpc_url, None).await?;
         let gas_estimate = gk
             .estimate_state_changes_gas(ACCESS_CONTROL_MAIN_ADDRESS, &state_updates)
             .await?;
@@ -479,8 +485,8 @@ mod tests {
     async fn test_estimate_state_changes_gas_access_control_failure() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url: Url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
 
@@ -488,7 +494,7 @@ mod tests {
         let trace = get_tx_trace(&provider, tx_hash).await?;
         let (state_updates, _) = compute_state_updates(trace).await?;
 
-        let gk = GasKillerDefault::new(rpc_url).await?;
+        let gk = GasKillerDefault::new(rpc_url, None).await?;
         let gas_estimate = gk
             .estimate_state_changes_gas(FAKE_ADDRESS, &state_updates)
             .await;
@@ -508,8 +514,8 @@ mod tests {
     async fn test_compute_state_updates_set() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -551,8 +557,8 @@ mod tests {
     async fn test_compute_state_updates_deposit() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -598,8 +604,8 @@ mod tests {
     async fn test_compute_state_updates_delegatecall() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -663,8 +669,8 @@ mod tests {
     async fn test_compute_state_updates_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url);
 
@@ -692,8 +698,8 @@ mod tests {
     async fn test_compute_state_update_simulate_call() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("TESTNET_RPC_URL")
-            .expect("TESTNET_RPC_URL must be set")
+        let rpc_url: Url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
             .parse()?;
 
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
