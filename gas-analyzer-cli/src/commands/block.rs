@@ -49,8 +49,12 @@ struct BlockResult {
 struct TransactionResult {
     og_tx_hash: TxHash,
     simulation_tx_hash: TxHash,
+    og_gas_used: u64,
     gas_used: u64,
+    og_gas_cost: u128,
+    og_status: bool,
     status: bool,
+    is_smart_contract_tx: bool,
 }
 
 #[derive(Serialize)]
@@ -62,6 +66,10 @@ struct TransactionFailure {
 
 struct QueuedTx {
     og_tx_hash: TxHash,
+    og_status: bool,
+    og_gas_used: u64,
+    og_gas_cost: u128,
+    is_smart_contract_tx: bool,
     pending_tx: PendingTransaction,
 }
 
@@ -144,6 +152,7 @@ async fn process_block(block_id: BlockId, fork_url: Url) -> Result<BlockResult> 
         .into_iter()
         .filter_map(|tx| tx)
         .collect::<Vec<_>>();
+    // let txs = txs.into_iter().take(10).collect::<Vec<_>>();
     info!("done preparing txs");
 
     let mut stepped_smart_contracts = HashSet::new();
@@ -151,6 +160,15 @@ async fn process_block(block_id: BlockId, fork_url: Url) -> Result<BlockResult> 
     let mut failed_tx_errors: HashMap<TxHash, QueueTxError> = HashMap::new();
     info!("sending txs...");
     for tx in txs {
+        // get gas usage in original tx
+        let og_status = tx.receipt.status();
+        let og_gas_used = tx.receipt.gas_used;
+        let og_gas_cost = tx.receipt.effective_gas_price;
+        let is_smart_contract_tx = match tx.tx_kind_data {
+            TxKindData::SmartContract { .. } => true,
+            _ => false,
+        };
+        debug!("Original tx gas used: {}", og_gas_used);
         let tx_hash = tx.receipt.transaction_hash;
         match queue_tx_for_next_block(
             tx,
@@ -159,7 +177,14 @@ async fn process_block(block_id: BlockId, fork_url: Url) -> Result<BlockResult> 
             &mut stepped_smart_contracts,
         )
         .await {
-            Ok(tx) => queued_txs.push(QueuedTx { og_tx_hash: tx_hash, pending_tx: tx }),
+            Ok(tx) => queued_txs.push(QueuedTx { 
+                og_tx_hash: tx_hash, 
+                og_gas_used: og_gas_used,
+                og_gas_cost: og_gas_cost,
+                og_status: og_status,
+                is_smart_contract_tx: is_smart_contract_tx,
+                pending_tx: tx
+            }),
             Err(QueueTxError::EOF) => warn!("EOF contract, skipping"),
             Err(QueueTxError::Eip7702) => warn!("EIP-7702 transaction, skipping"),
             Err(e) => {
@@ -192,8 +217,12 @@ async fn process_block(block_id: BlockId, fork_url: Url) -> Result<BlockResult> 
                         successful_tx_results.push(TransactionResult {
                             og_tx_hash: queued_tx.og_tx_hash,
                             simulation_tx_hash: tx_hash,
-                            gas_used: receipt.gas_used(),
+                            og_gas_used: queued_tx.og_gas_used,
+                            gas_used: receipt.gas_used,
+                            og_gas_cost: queued_tx.og_gas_cost,
+                            og_status: queued_tx.og_status,
                             status: receipt.status(),
+                            is_smart_contract_tx: queued_tx.is_smart_contract_tx,
                         });
                     }
                     Ok(None) => {
