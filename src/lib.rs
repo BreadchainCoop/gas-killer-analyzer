@@ -28,7 +28,7 @@ use gk::GasKillerDefault;
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
 use url::Url;
 
-const TURETZKY_UPPER_GAS_LIMIT: u64 = 200000u64;
+const TURETZKY_UPPER_GAS_LIMIT: u64 = 250000u64;
 
 fn copy_memory(memory: &[u8], offset: usize, length: usize) -> Vec<u8> {
     if memory.len() >= offset + length {
@@ -368,6 +368,7 @@ pub async fn gaskiller_reporter(
             &state_updates,
         )
         .await?;
+    let gaskiller_gas_estimate = gaskiller_gas_estimate + TURETZKY_UPPER_GAS_LIMIT;
     let gas_used = receipt.gas_used;
     let approx_gas_price_per_unit: f64 = receipt.effective_gas_price as f64 / gas_used as f64;
     let gaskiller_estimated_gas_cost = approx_gas_price_per_unit * gaskiller_gas_estimate as f64;
