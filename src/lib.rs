@@ -494,8 +494,15 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
     let gas_estimate = gk
         .estimate_state_changes_gas(contract_address, &state_updates)
         .await?;
+
+    let encoded_updates = encode_state_updates_to_abi(&state_updates);
+
+    // Print the full hex-encoded storage updates for debugging
+    println!("[call_to_encoded_state_updates_with_gas_estimate] storage_updates bytes:");
+    println!("0x{}", encoded_updates.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+
     Ok((
-        encode_state_updates_to_abi(&state_updates),
+        encoded_updates,
         gas_estimate,
         skipped_opcodes,
     ))
