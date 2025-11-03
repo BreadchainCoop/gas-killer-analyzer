@@ -25,7 +25,7 @@ use alloy::{
 use alloy_rpc_types::TransactionTrait;
 use anyhow::{Result, anyhow, bail};
 use gk::GasKillerDefault;
-use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
+use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType};
 use url::Url;
 
 const TURETZKY_UPPER_GAS_LIMIT: u64 = 200000u64;
@@ -254,28 +254,104 @@ fn encode_state_updates_to_sol(
 
 fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
     let (state_update_types, datas) = encode_state_updates_to_sol(state_updates);
-    let types_as_u8: Vec<u8> = state_update_types
-        .iter()
-        .map(|x| *x as u8)
-        .collect();
+    let types_as_u8: Vec<u8> = state_update_types.iter().map(|x| *x as u8).collect();
 
     println!(
         "[encode_state_updates_to_abi] Encoding {} state updates as tuple (types[], data[])",
         types_as_u8.len()
     );
 
-    // Encode as a tuple (types, data) instead of encoding the StateUpdates struct
-    // This avoids the extra wrapping layer that would make Solidity decoding fail
-    let encoded = (types_as_u8.clone(), datas.clone()).abi_encode();
+    // Encode as RAW PARAMETER LIST (bytes, bytes[]), not a single tuple argument
+    // This yields a head starting with 0x40 instead of 0x20
+    fn write_u256_word(buf: &mut Vec<u8>, value: usize) {
+        let mut word = [0u8; 32];
+        let bytes = (value as u128).to_be_bytes();
+        // place the u128 at the end; sizes here are well within u128
+        word[32 - bytes.len()..].copy_from_slice(&bytes);
+        buf.extend_from_slice(&word);
+    }
+
+    fn pad32_len(len: usize) -> usize {
+        len.div_ceil(32) * 32
+    }
+
+    fn encode_bytes(value: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(32 + pad32_len(value.len()));
+        write_u256_word(&mut out, value.len());
+        out.extend_from_slice(value);
+        let padding = pad32_len(value.len()) - value.len();
+        if padding > 0 {
+            out.extend(std::iter::repeat_n(0u8, padding));
+        }
+        out
+    }
+
+    fn encode_bytes_array(values: &[Bytes]) -> Vec<u8> {
+        // bytes[] encoding: length N, N offsets (relative to start of array data), followed by element payloads
+        let n = values.len();
+        // Precompute each encoded element length
+        let encoded_elements: Vec<Vec<u8>> =
+            values.iter().map(|b| encode_bytes(b.as_ref())).collect();
+
+        // Size of the head inside the array (N offsets of 32 bytes)
+        let head_size = 32 * n;
+        // Offsets are relative to the start of the array data (at the length word)
+        let mut out = Vec::new();
+        // length
+        write_u256_word(&mut out, n);
+
+        // write offsets
+        // first element starts after the offsets table (relative to start after length word)
+        let mut running_offset = head_size;
+        for enc in &encoded_elements {
+            write_u256_word(&mut out, running_offset);
+            running_offset += enc.len();
+        }
+
+        // write element payloads
+        for enc in encoded_elements {
+            out.extend_from_slice(&enc);
+        }
+
+        out
+    }
+
+    // Build head with two offsets: offset(types) = 0x40, offset(datas) = 0x40 + len(types payload)
+    let types_payload = encode_bytes(&types_as_u8);
+    let datas_payload = encode_bytes_array(&datas);
+
+    let offset_types = 0x40usize;
+    let offset_datas = offset_types + types_payload.len();
+
+    let mut encoded: Vec<u8> = Vec::with_capacity(64 + types_payload.len() + datas_payload.len());
+    write_u256_word(&mut encoded, offset_types);
+    write_u256_word(&mut encoded, offset_datas);
+    encoded.extend_from_slice(&types_payload);
+    encoded.extend_from_slice(&datas_payload);
 
     // Log first 64 bytes for sanity check
     let preview = if encoded.len() >= 64 {
-        format!("0x{}", encoded[0..64].iter().map(|b| format!("{:02x}", b)).collect::<String>())
+        format!(
+            "0x{}",
+            encoded[0..64]
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>()
+        )
     } else {
-        format!("0x{}", encoded.iter().map(|b| format!("{:02x}", b)).collect::<String>())
+        format!(
+            "0x{}",
+            encoded
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>()
+        )
     };
     println!("[encode_state_updates_to_abi] First 64 bytes: {}", preview);
-    println!("[encode_state_updates_to_abi] Total encoded length: {} bytes", encoded.len());
+    println!(
+        "[encode_state_updates_to_abi] Total encoded length: {} bytes",
+        encoded.len()
+    );
 
     Bytes::copy_from_slice(&encoded)
 }
@@ -833,12 +909,13 @@ mod tests {
 
         let encoded = encode_state_updates_to_abi(&state_updates);
 
-        // Decode it back as (uint8[], bytes[])
-        // This should work without the extra wrapping layer
-        let decoded = <(Vec<u8>, Vec<Bytes>)>::abi_decode(&encoded, true);
+        // Decode it back as raw parameter list (bytes, bytes[])
+        // Use abi_decode_params because we encoded a param list, not a single tuple value
+        let decoded = <(Bytes, Vec<Bytes>)>::abi_decode_params(&encoded, true);
 
         match decoded {
-            Ok((types, data)) => {
+            Ok((types_bytes, data)) => {
+                let types: Vec<u8> = types_bytes.to_vec();
                 assert_eq!(types.len(), 3, "Should have 3 state updates");
                 assert_eq!(data.len(), 3, "Should have 3 data entries");
                 assert_eq!(types[0], StateUpdateType::STORE as u8);
@@ -849,14 +926,23 @@ mod tests {
                 // The first 32 bytes should be 0x40 (offset to types[]), not 0x20
                 if encoded.len() >= 32 {
                     let first_word = &encoded[0..32];
-                    let is_wrapper = first_word == [0; 31].iter().chain([0x20].iter()).copied().collect::<Vec<u8>>()[..];
+                    let is_wrapper = {
+                        let mut expected = [0u8; 32];
+                        expected[31] = 0x20;
+                        first_word == expected
+                    };
                     if is_wrapper {
-                        bail!("Encoding still has the extra wrapper! First 32 bytes should be the offset to types[] (0x40), not a wrapper (0x20).");
+                        bail!(
+                            "Encoding still has the extra wrapper! First 32 bytes should be the offset to types[] (0x40), not a wrapper (0x20)."
+                        );
                     }
                 }
             }
             Err(e) => {
-                bail!("Failed to decode as (uint8[], bytes[]): {}. The encoding is still wrong.", e);
+                bail!(
+                    "Failed to decode as (uint8[], bytes[]): {}. The encoding is still wrong.",
+                    e
+                );
             }
         }
 
