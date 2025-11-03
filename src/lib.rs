@@ -253,20 +253,18 @@ fn encode_state_updates_to_sol(
 }
 
 fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
-    let (state_update_types, datas) = encode_state_updates_to_sol(state_updates);
-    let types_as_u8: Vec<u8> = state_update_types.iter().map(|x| *x as u8).collect();
+    let (state_update_types, _datas) = encode_state_updates_to_sol(state_updates);
 
     println!(
-        "[encode_state_updates_to_abi] Encoding {} state updates as tuple (types[], data[])",
-        types_as_u8.len()
+        "[encode_state_updates_to_abi] NEW ENCODING: Encoding {} state updates as StateUpdateType[] (enum array only)",
+        state_update_types.len()
     );
 
-    // Encode as RAW PARAMETER LIST (bytes, bytes[]), not a single tuple argument
-    // This yields a head starting with 0x40 instead of 0x20
+    // Encode as StateUpdateType[] - just an array of enum values (uint8 in ABI)
+    // This is a simple uint8[] encoding
     fn write_u256_word(buf: &mut Vec<u8>, value: usize) {
         let mut word = [0u8; 32];
         let bytes = (value as u128).to_be_bytes();
-        // place the u128 at the end; sizes here are well within u128
         word[32 - bytes.len()..].copy_from_slice(&bytes);
         buf.extend_from_slice(&word);
     }
@@ -275,65 +273,31 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
         len.div_ceil(32) * 32
     }
 
-    fn encode_bytes(value: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(32 + pad32_len(value.len()));
-        write_u256_word(&mut out, value.len());
-        out.extend_from_slice(value);
-        let padding = pad32_len(value.len()) - value.len();
-        if padding > 0 {
-            out.extend(std::iter::repeat_n(0u8, padding));
-        }
-        out
+    // Encode StateUpdateType[] as a dynamic array
+    // Format: [offset to array data (0x20)] [array length] [padded enum values]
+    let types_as_u8: Vec<u8> = state_update_types.iter().map(|x| *x as u8).collect();
+    let n = types_as_u8.len();
+
+    let mut encoded: Vec<u8> = Vec::new();
+
+    // Offset to array data (always 0x20 for a single dynamic array)
+    write_u256_word(&mut encoded, 0x20);
+
+    // Array length
+    write_u256_word(&mut encoded, n);
+
+    // Array data (packed bytes, then padded to 32-byte boundary)
+    encoded.extend_from_slice(&types_as_u8);
+    let padding = pad32_len(n) - n;
+    if padding > 0 {
+        encoded.extend(std::iter::repeat_n(0u8, padding));
     }
 
-    fn encode_bytes_array(values: &[Bytes]) -> Vec<u8> {
-        // bytes[] encoding: length N, N offsets (relative to start of array data), followed by element payloads
-        let n = values.len();
-        // Precompute each encoded element length
-        let encoded_elements: Vec<Vec<u8>> =
-            values.iter().map(|b| encode_bytes(b.as_ref())).collect();
-
-        // Size of the head inside the array (N offsets of 32 bytes)
-        let head_size = 32 * n;
-        // Offsets are relative to the start of the array data (at the length word)
-        let mut out = Vec::new();
-        // length
-        write_u256_word(&mut out, n);
-
-        // write offsets
-        // first element starts after the offsets table (relative to start after length word)
-        let mut running_offset = head_size;
-        for enc in &encoded_elements {
-            write_u256_word(&mut out, running_offset);
-            running_offset += enc.len();
-        }
-
-        // write element payloads
-        for enc in encoded_elements {
-            out.extend_from_slice(&enc);
-        }
-
-        out
-    }
-
-    // Build head with two offsets: offset(types) = 0x40, offset(datas) = 0x40 + len(types payload)
-    let types_payload = encode_bytes(&types_as_u8);
-    let datas_payload = encode_bytes_array(&datas);
-
-    let offset_types = 0x40usize;
-    let offset_datas = offset_types + types_payload.len();
-
-    let mut encoded: Vec<u8> = Vec::with_capacity(64 + types_payload.len() + datas_payload.len());
-    write_u256_word(&mut encoded, offset_types);
-    write_u256_word(&mut encoded, offset_datas);
-    encoded.extend_from_slice(&types_payload);
-    encoded.extend_from_slice(&datas_payload);
-
-    // Log first 64 bytes for sanity check
-    let preview = if encoded.len() >= 64 {
+    // Log first 96 bytes for sanity check (offset + length + first data word)
+    let preview = if encoded.len() >= 96 {
         format!(
             "0x{}",
-            encoded[0..64]
+            encoded[0..96]
                 .iter()
                 .map(|b| format!("{:02x}", b))
                 .collect::<String>()
@@ -347,11 +311,13 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
                 .collect::<String>()
         )
     };
-    println!("[encode_state_updates_to_abi] First 64 bytes: {}", preview);
+    println!("[encode_state_updates_to_abi] *** ENUM ARRAY ONLY ENCODING ***");
+    println!("[encode_state_updates_to_abi] First 96 bytes (offset + length + data): {}", preview);
     println!(
         "[encode_state_updates_to_abi] Total encoded length: {} bytes",
         encoded.len()
     );
+    println!("[encode_state_updates_to_abi] Expected format: StateUpdateType[] (uint8[])");
 
     Bytes::copy_from_slice(&encoded)
 }
@@ -498,8 +464,11 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
     let encoded_updates = encode_state_updates_to_abi(&state_updates);
 
     // Print the full hex-encoded storage updates for debugging
-    println!("[call_to_encoded_state_updates_with_gas_estimate] storage_updates bytes:");
+    println!("\n========================================");
+    println!("[call_to_encoded_state_updates_with_gas_estimate] ENUM ARRAY ENCODING");
+    println!("[call_to_encoded_state_updates_with_gas_estimate] Full storage_updates bytes (StateUpdateType[]):");
     println!("0x{}", encoded_updates.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+    println!("========================================\n");
 
     Ok((
         encoded_updates,
