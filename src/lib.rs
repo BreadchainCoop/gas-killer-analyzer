@@ -254,14 +254,14 @@ fn encode_state_updates_to_sol(
 
 fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
     let (state_update_types, datas) = encode_state_updates_to_sol(state_updates);
-    let state_updates = StateUpdates {
-        types: state_update_types
-            .iter()
-            .map(|x| *x as u8)
-            .collect::<Vec<_>>(),
-        data: datas,
-    };
-    let encoded = StateUpdates::abi_encode(&state_updates);
+    let types_as_u8: Vec<u8> = state_update_types
+        .iter()
+        .map(|x| *x as u8)
+        .collect();
+
+    // Encode as a tuple (types, data) instead of encoding the StateUpdates struct
+    // This avoids the extra wrapping layer that would make Solidity decoding fail
+    let encoded = (types_as_u8, datas).abi_encode();
     Bytes::copy_from_slice(&encoded)
 }
 
@@ -793,6 +793,58 @@ mod tests {
             log.topic1,
             b256!("0x9455957c3b77d1d4ed071e2b469dd77e37fc5dfd3b4d44dc8a997cc97c7b3d49")
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_encoding_format() -> Result<()> {
+        // Test that encoding produces the correct format for Solidity consumption
+        // The bug was that StateUpdates::abi_encode wraps in an extra tuple layer
+
+        // Create multiple state updates to match the chisel example
+        let state_updates = vec![
+            StateUpdate::Store(IStateUpdateTypes::Store {
+                slot: b256!("debfdfd5a50ad117c10898d68b5ccf0893c6b40d4f443f902e2e7646601bdeaf"),
+                value: b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+            }),
+            StateUpdate::Log0(IStateUpdateTypes::Log0 {
+                data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
+            }),
+            StateUpdate::Log1(IStateUpdateTypes::Log1 {
+                data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
+                topic1: b256!("fd3dfbb3da06b2710848916c65866a3d0e050047402579a6e1714261137c19c6"),
+            }),
+        ];
+
+        let encoded = encode_state_updates_to_abi(&state_updates);
+
+        // Decode it back as (uint8[], bytes[])
+        // This should work without the extra wrapping layer
+        let decoded = <(Vec<u8>, Vec<Bytes>)>::abi_decode(&encoded, true);
+
+        match decoded {
+            Ok((types, data)) => {
+                assert_eq!(types.len(), 3, "Should have 3 state updates");
+                assert_eq!(data.len(), 3, "Should have 3 data entries");
+                assert_eq!(types[0], StateUpdateType::STORE as u8);
+                assert_eq!(types[1], StateUpdateType::LOG0 as u8);
+                assert_eq!(types[2], StateUpdateType::LOG1 as u8);
+
+                // Verify the encoding doesn't start with 0x20 (the extra wrapper)
+                // The first 32 bytes should be 0x40 (offset to types[]), not 0x20
+                if encoded.len() >= 32 {
+                    let first_word = &encoded[0..32];
+                    let is_wrapper = first_word == [0; 31].iter().chain([0x20].iter()).copied().collect::<Vec<u8>>()[..];
+                    if is_wrapper {
+                        bail!("Encoding still has the extra wrapper! First 32 bytes should be the offset to types[] (0x40), not a wrapper (0x20).");
+                    }
+                }
+            }
+            Err(e) => {
+                bail!("Failed to decode as (uint8[], bytes[]): {}. The encoding is still wrong.", e);
+            }
+        }
+
         Ok(())
     }
 }
