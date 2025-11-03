@@ -259,9 +259,24 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
         .map(|x| *x as u8)
         .collect();
 
+    println!(
+        "[encode_state_updates_to_abi] Encoding {} state updates as tuple (types[], data[])",
+        types_as_u8.len()
+    );
+
     // Encode as a tuple (types, data) instead of encoding the StateUpdates struct
     // This avoids the extra wrapping layer that would make Solidity decoding fail
-    let encoded = (types_as_u8, datas).abi_encode();
+    let encoded = (types_as_u8.clone(), datas.clone()).abi_encode();
+
+    // Log first 64 bytes for sanity check
+    let preview = if encoded.len() >= 64 {
+        format!("0x{}", encoded[0..64].iter().map(|b| format!("{:02x}", b)).collect::<String>())
+    } else {
+        format!("0x{}", encoded.iter().map(|b| format!("{:02x}", b)).collect::<String>())
+    };
+    println!("[encode_state_updates_to_abi] First 64 bytes: {}", preview);
+    println!("[encode_state_updates_to_abi] Total encoded length: {} bytes", encoded.len());
+
     Bytes::copy_from_slice(&encoded)
 }
 
