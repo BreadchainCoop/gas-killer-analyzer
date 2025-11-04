@@ -306,9 +306,13 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
         out
     }
 
-    // Encode StateUpdateType[] (enum array encoded as uint8[])
-    let types_as_u8: Vec<u8> = state_update_types.iter().map(|x| *x as u8).collect();
-    let types_payload = encode_bytes(&types_as_u8);
+    // Encode StateUpdateType[] (enum array - each enum is a full 32-byte word)
+    // In Solidity ABI, enums in arrays are encoded as uint256 values, not packed bytes
+    let mut types_payload = Vec::new();
+    write_u256_word(&mut types_payload, state_update_types.len()); // array length
+    for enum_val in &state_update_types {
+        write_u256_word(&mut types_payload, *enum_val as u8 as usize); // each enum as 32 bytes
+    }
 
     // Encode bytes[]
     let datas_payload = encode_bytes_array(&datas);
