@@ -10,7 +10,7 @@ use std::{collections::HashSet, str::FromStr};
 use structs::{GasKillerReport, Opcode, ReportDetails};
 
 use alloy::{
-    primitives::{Address, Bytes, FixedBytes, TxKind},
+    primitives::{Address, Bytes, FixedBytes, TxKind, U256},
     providers::{Provider, ProviderBuilder, ext::DebugApi},
     rpc::types::{
         TransactionReceipt,
@@ -255,13 +255,7 @@ fn encode_state_updates_to_sol(
 fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
     let (state_update_types, datas) = encode_state_updates_to_sol(state_updates);
 
-    println!(
-        "[encode_state_updates_to_abi] TUPLE ENCODING: Encoding {} state updates as (StateUpdateType[], bytes[])",
-        state_update_types.len()
-    );
-
     // Encode as tuple (StateUpdateType[], bytes[])
-    // StateUpdateType is an enum which encodes as uint8 in the array
     fn write_u256_word(buf: &mut Vec<u8>, value: usize) {
         let mut word = [0u8; 32];
         let bytes = (value as u128).to_be_bytes();
@@ -307,7 +301,6 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
     }
 
     // Encode StateUpdateType[] (enum array - each enum is a full 32-byte word)
-    // In Solidity ABI, enums in arrays are encoded as uint256 values, not packed bytes
     let mut types_payload = Vec::new();
     write_u256_word(&mut types_payload, state_update_types.len()); // array length
     for enum_val in &state_update_types {
@@ -327,36 +320,50 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
     encoded.extend_from_slice(&types_payload);
     encoded.extend_from_slice(&datas_payload);
 
-    // Log first 96 bytes for sanity check
-    let preview = if encoded.len() >= 96 {
-        format!(
-            "0x{}",
-            encoded[0..96]
-                .iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<String>()
-        )
-    } else {
-        format!(
-            "0x{}",
-            encoded
-                .iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<String>()
-        )
-    };
-    println!("[encode_state_updates_to_abi] *** TUPLE (StateUpdateType[], bytes[]) ENCODING ***");
-    println!(
-        "[encode_state_updates_to_abi] First 96 bytes (offsets + start of types): {}",
-        preview
-    );
-    println!(
-        "[encode_state_updates_to_abi] Total encoded length: {} bytes",
-        encoded.len()
-    );
-    println!("[encode_state_updates_to_abi] Expected decode: (StateUpdateType[], bytes[])");
-
     Bytes::copy_from_slice(&encoded)
+}
+
+// Decode (uint256[], bytes[]) ABI tuple used for state update transport
+#[allow(dead_code)]
+fn decode_state_updates_tuple(data: &[u8]) -> Result<(Vec<U256>, Vec<Bytes>)> {
+    fn read_u256_as_usize(word: &[u8]) -> usize {
+        let mut buf = [0u8; 16];
+        let copy_len = word.len().min(16);
+        buf[16 - copy_len..].copy_from_slice(&word[word.len() - copy_len..]);
+        u128::from_be_bytes(buf) as usize
+    }
+
+    fn get(data: &[u8], start: usize, len: usize) -> Result<&[u8]> {
+        if start + len > data.len() {
+            bail!("slice {}..{} of {}", start, start + len, data.len());
+        }
+        Ok(&data[start..start + len])
+    }
+
+    let types_offset = read_u256_as_usize(get(data, 0, 32)?);
+    let data_offset = read_u256_as_usize(get(data, 32, 32)?);
+
+    // types: uint256[]
+    let n_types = read_u256_as_usize(get(data, types_offset, 32)?);
+    let mut types = Vec::with_capacity(n_types);
+    for i in 0..n_types {
+        let word = get(data, types_offset + 32 + i * 32, 32)?;
+        types.push(U256::from_be_slice(word));
+    }
+
+    // data: bytes[]
+    let n_data = read_u256_as_usize(get(data, data_offset, 32)?);
+    let head = data_offset + 32;
+    let tail = head + 32 * n_data;
+    let mut out = Vec::with_capacity(n_data);
+    for i in 0..n_data {
+        let rel = read_u256_as_usize(get(data, head + i * 32, 32)?);
+        let start = tail + rel;
+        let len = read_u256_as_usize(get(data, start, 32)?);
+        out.push(Bytes::copy_from_slice(get(data, start + 32, len)?));
+    }
+
+    Ok((types, out))
 }
 
 pub async fn invokes_smart_contract(
@@ -386,6 +393,7 @@ pub async fn gas_estimate_block(
     let block_number = all_receipts[0]
         .block_number
         .expect("couldn't find block number in receipt");
+
     //TODO: filter out non-smart-contract tx
     let receipts: Vec<_> = all_receipts
         .into_iter()
@@ -498,24 +506,11 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
         .estimate_state_changes_gas(contract_address, &state_updates)
         .await?;
 
-    let encoded_updates = encode_state_updates_to_abi(&state_updates);
-
-    // Print the full hex-encoded storage updates for debugging
-    println!("\n========================================");
-    println!("[call_to_encoded_state_updates_with_gas_estimate] ENUM ARRAY ENCODING");
-    println!(
-        "[call_to_encoded_state_updates_with_gas_estimate] Full storage_updates bytes (StateUpdateType[]):"
-    );
-    println!(
-        "0x{}",
-        encoded_updates
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>()
-    );
-    println!("========================================\n");
-
-    Ok((encoded_updates, gas_estimate, skipped_opcodes))
+    Ok((
+        encode_state_updates_to_abi(&state_updates),
+        gas_estimate,
+        skipped_opcodes,
+    ))
 }
 
 #[cfg(test)]
@@ -546,53 +541,16 @@ mod tests {
         ];
 
         let encoded = encode_state_updates_to_abi(&state_updates);
-
-        println!("\n========== (StateUpdateType[], bytes[]) TUPLE ENCODING TEST ==========");
-        println!("Number of state updates: {}", state_updates.len());
-        println!("Encoded length: {} bytes", encoded.len());
-        println!("\nFull hex output:");
-        println!(
-            "0x{}",
-            encoded
-                .iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<String>()
+        let (types, data) = decode_state_updates_tuple(&encoded)?;
+        assert_eq!(
+            types,
+            vec![
+                alloy::primitives::U256::from(0u8),
+                alloy::primitives::U256::from(2u8),
+                alloy::primitives::U256::from(3u8),
+            ]
         );
-
-        println!("\nBreakdown:");
-        if encoded.len() >= 32 {
-            println!(
-                "Offset to types[] (first 32 bytes): 0x{}",
-                encoded[0..32]
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<String>()
-            );
-        }
-        if encoded.len() >= 64 {
-            println!(
-                "Offset to bytes[] (next 32 bytes):  0x{}",
-                encoded[32..64]
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<String>()
-            );
-        }
-        if encoded.len() >= 96 {
-            println!(
-                "Start of types data (next 32 bytes): 0x{}",
-                encoded[64..96]
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<String>()
-            );
-        }
-        println!("\nExpected Solidity decode:");
-        println!(
-            "(StateUpdateType[] memory types, bytes[] memory args) = abi.decode(storageUpdates, (StateUpdateType[], bytes[]));"
-        );
-        println!("============================================\n");
-
+        assert_eq!(data.len(), 3);
         Ok(())
     }
 
@@ -994,39 +952,25 @@ mod tests {
 
         let encoded = encode_state_updates_to_abi(&state_updates);
 
-        // Decode it back as raw parameter list (bytes, bytes[])
-        // Use abi_decode_params because we encoded a param list, not a single tuple value
-        let decoded = <(Bytes, Vec<Bytes>)>::abi_decode_params(&encoded, true);
+        let (types, data) = decode_state_updates_tuple(&encoded)?;
+        assert_eq!(types.len(), 3, "Should have 3 state updates");
+        assert_eq!(data.len(), 3, "Should have 3 data entries");
+        assert_eq!(types[0], U256::from(StateUpdateType::STORE as u8));
+        assert_eq!(types[1], U256::from(StateUpdateType::LOG0 as u8));
+        assert_eq!(types[2], U256::from(StateUpdateType::LOG1 as u8));
 
-        match decoded {
-            Ok((types_bytes, data)) => {
-                let types: Vec<u8> = types_bytes.to_vec();
-                assert_eq!(types.len(), 3, "Should have 3 state updates");
-                assert_eq!(data.len(), 3, "Should have 3 data entries");
-                assert_eq!(types[0], StateUpdateType::STORE as u8);
-                assert_eq!(types[1], StateUpdateType::LOG0 as u8);
-                assert_eq!(types[2], StateUpdateType::LOG1 as u8);
-
-                // Verify the encoding doesn't start with 0x20 (the extra wrapper)
-                // The first 32 bytes should be 0x40 (offset to types[]), not 0x20
-                if encoded.len() >= 32 {
-                    let first_word = &encoded[0..32];
-                    let is_wrapper = {
-                        let mut expected = [0u8; 32];
-                        expected[31] = 0x20;
-                        first_word == expected
-                    };
-                    if is_wrapper {
-                        bail!(
-                            "Encoding still has the extra wrapper! First 32 bytes should be the offset to types[] (0x40), not a wrapper (0x20)."
-                        );
-                    }
-                }
-            }
-            Err(e) => {
+        // Verify the encoding doesn't start with 0x20 (the extra wrapper)
+        // The first 32 bytes should be 0x40 (offset to types[]), not 0x20
+        if encoded.len() >= 32 {
+            let first_word = &encoded[0..32];
+            let is_wrapper = {
+                let mut expected = [0u8; 32];
+                expected[31] = 0x20;
+                first_word == expected
+            };
+            if is_wrapper {
                 bail!(
-                    "Failed to decode as (uint8[], bytes[]): {}. The encoding is still wrong.",
-                    e
+                    "Encoding still has the extra wrapper! First 32 bytes should be the offset to types[] (0x40), not a wrapper (0x20)."
                 );
             }
         }
