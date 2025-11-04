@@ -253,15 +253,15 @@ fn encode_state_updates_to_sol(
 }
 
 fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
-    let (state_update_types, _datas) = encode_state_updates_to_sol(state_updates);
+    let (state_update_types, datas) = encode_state_updates_to_sol(state_updates);
 
     println!(
-        "[encode_state_updates_to_abi] NEW ENCODING: Encoding {} state updates as StateUpdateType[] (enum array only)",
+        "[encode_state_updates_to_abi] TUPLE ENCODING: Encoding {} state updates as (StateUpdateType[], bytes[])",
         state_update_types.len()
     );
 
-    // Encode as StateUpdateType[] - just an array of enum values (uint8 in ABI)
-    // This is a simple uint8[] encoding
+    // Encode as tuple (StateUpdateType[], bytes[])
+    // StateUpdateType is an enum which encodes as uint8 in the array
     fn write_u256_word(buf: &mut Vec<u8>, value: usize) {
         let mut word = [0u8; 32];
         let bytes = (value as u128).to_be_bytes();
@@ -273,27 +273,57 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
         len.div_ceil(32) * 32
     }
 
-    // Encode StateUpdateType[] as a dynamic array
-    // Format: [offset to array data (0x20)] [array length] [padded enum values]
-    let types_as_u8: Vec<u8> = state_update_types.iter().map(|x| *x as u8).collect();
-    let n = types_as_u8.len();
-
-    let mut encoded: Vec<u8> = Vec::new();
-
-    // Offset to array data (always 0x20 for a single dynamic array)
-    write_u256_word(&mut encoded, 0x20);
-
-    // Array length
-    write_u256_word(&mut encoded, n);
-
-    // Array data (packed bytes, then padded to 32-byte boundary)
-    encoded.extend_from_slice(&types_as_u8);
-    let padding = pad32_len(n) - n;
-    if padding > 0 {
-        encoded.extend(std::iter::repeat_n(0u8, padding));
+    fn encode_bytes(value: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(32 + pad32_len(value.len()));
+        write_u256_word(&mut out, value.len());
+        out.extend_from_slice(value);
+        let padding = pad32_len(value.len()) - value.len();
+        if padding > 0 {
+            out.extend(std::iter::repeat_n(0u8, padding));
+        }
+        out
     }
 
-    // Log first 96 bytes for sanity check (offset + length + first data word)
+    fn encode_bytes_array(values: &[Bytes]) -> Vec<u8> {
+        let n = values.len();
+        let encoded_elements: Vec<Vec<u8>> =
+            values.iter().map(|b| encode_bytes(b.as_ref())).collect();
+
+        let head_size = 32 * n;
+        let mut out = Vec::new();
+        write_u256_word(&mut out, n);
+
+        let mut running_offset = head_size;
+        for enc in &encoded_elements {
+            write_u256_word(&mut out, running_offset);
+            running_offset += enc.len();
+        }
+
+        for enc in encoded_elements {
+            out.extend_from_slice(&enc);
+        }
+
+        out
+    }
+
+    // Encode StateUpdateType[] (enum array encoded as uint8[])
+    let types_as_u8: Vec<u8> = state_update_types.iter().map(|x| *x as u8).collect();
+    let types_payload = encode_bytes(&types_as_u8);
+
+    // Encode bytes[]
+    let datas_payload = encode_bytes_array(&datas);
+
+    // Build tuple with two offsets
+    let offset_types = 0x40usize;
+    let offset_datas = offset_types + types_payload.len();
+
+    let mut encoded: Vec<u8> = Vec::with_capacity(64 + types_payload.len() + datas_payload.len());
+    write_u256_word(&mut encoded, offset_types);
+    write_u256_word(&mut encoded, offset_datas);
+    encoded.extend_from_slice(&types_payload);
+    encoded.extend_from_slice(&datas_payload);
+
+    // Log first 96 bytes for sanity check
     let preview = if encoded.len() >= 96 {
         format!(
             "0x{}",
@@ -311,13 +341,13 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
                 .collect::<String>()
         )
     };
-    println!("[encode_state_updates_to_abi] *** ENUM ARRAY ONLY ENCODING ***");
-    println!("[encode_state_updates_to_abi] First 96 bytes (offset + length + data): {}", preview);
+    println!("[encode_state_updates_to_abi] *** TUPLE (StateUpdateType[], bytes[]) ENCODING ***");
+    println!("[encode_state_updates_to_abi] First 96 bytes (offsets + start of types): {}", preview);
     println!(
         "[encode_state_updates_to_abi] Total encoded length: {} bytes",
         encoded.len()
     );
-    println!("[encode_state_updates_to_abi] Expected format: StateUpdateType[] (uint8[])");
+    println!("[encode_state_updates_to_abi] Expected decode: (StateUpdateType[], bytes[])");
 
     Bytes::copy_from_slice(&encoded)
 }
@@ -486,6 +516,51 @@ mod tests {
     use constants::*;
     use csv::Writer;
     use sol_types::SimpleStorage;
+
+    #[test]
+    fn test_stateupdatetype_tuple_encoding() -> Result<()> {
+        // Test encoding as (StateUpdateType[], bytes[]) tuple
+        let state_updates = vec![
+            StateUpdate::Store(IStateUpdateTypes::Store {
+                slot: b256!("debfdfd5a50ad117c10898d68b5ccf0893c6b40d4f443f902e2e7646601bdeaf"),
+                value: b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+            }),
+            StateUpdate::Log0(IStateUpdateTypes::Log0 {
+                data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
+            }),
+            StateUpdate::Log1(IStateUpdateTypes::Log1 {
+                data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
+                topic1: b256!("fd3dfbb3da06b2710848916c65866a3d0e050047402579a6e1714261137c19c6"),
+            }),
+        ];
+
+        let encoded = encode_state_updates_to_abi(&state_updates);
+
+        println!("\n========== (StateUpdateType[], bytes[]) TUPLE ENCODING TEST ==========");
+        println!("Number of state updates: {}", state_updates.len());
+        println!("Encoded length: {} bytes", encoded.len());
+        println!("\nFull hex output:");
+        println!("0x{}", encoded.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+
+        println!("\nBreakdown:");
+        if encoded.len() >= 32 {
+            println!("Offset to types[] (first 32 bytes): 0x{}",
+                encoded[0..32].iter().map(|b| format!("{:02x}", b)).collect::<String>());
+        }
+        if encoded.len() >= 64 {
+            println!("Offset to bytes[] (next 32 bytes):  0x{}",
+                encoded[32..64].iter().map(|b| format!("{:02x}", b)).collect::<String>());
+        }
+        if encoded.len() >= 96 {
+            println!("Start of types data (next 32 bytes): 0x{}",
+                encoded[64..96].iter().map(|b| format!("{:02x}", b)).collect::<String>());
+        }
+        println!("\nExpected Solidity decode:");
+        println!("(StateUpdateType[] memory types, bytes[] memory args) = abi.decode(storageUpdates, (StateUpdateType[], bytes[]));");
+        println!("============================================\n");
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_csv_writer() -> Result<()> {
