@@ -346,7 +346,10 @@ fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
         )
     };
     println!("[encode_state_updates_to_abi] *** TUPLE (StateUpdateType[], bytes[]) ENCODING ***");
-    println!("[encode_state_updates_to_abi] First 96 bytes (offsets + start of types): {}", preview);
+    println!(
+        "[encode_state_updates_to_abi] First 96 bytes (offsets + start of types): {}",
+        preview
+    );
     println!(
         "[encode_state_updates_to_abi] Total encoded length: {} bytes",
         encoded.len()
@@ -500,15 +503,19 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
     // Print the full hex-encoded storage updates for debugging
     println!("\n========================================");
     println!("[call_to_encoded_state_updates_with_gas_estimate] ENUM ARRAY ENCODING");
-    println!("[call_to_encoded_state_updates_with_gas_estimate] Full storage_updates bytes (StateUpdateType[]):");
-    println!("0x{}", encoded_updates.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+    println!(
+        "[call_to_encoded_state_updates_with_gas_estimate] Full storage_updates bytes (StateUpdateType[]):"
+    );
+    println!(
+        "0x{}",
+        encoded_updates
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>()
+    );
     println!("========================================\n");
 
-    Ok((
-        encoded_updates,
-        gas_estimate,
-        skipped_opcodes,
-    ))
+    Ok((encoded_updates, gas_estimate, skipped_opcodes))
 }
 
 #[cfg(test)]
@@ -544,23 +551,46 @@ mod tests {
         println!("Number of state updates: {}", state_updates.len());
         println!("Encoded length: {} bytes", encoded.len());
         println!("\nFull hex output:");
-        println!("0x{}", encoded.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+        println!(
+            "0x{}",
+            encoded
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>()
+        );
 
         println!("\nBreakdown:");
         if encoded.len() >= 32 {
-            println!("Offset to types[] (first 32 bytes): 0x{}",
-                encoded[0..32].iter().map(|b| format!("{:02x}", b)).collect::<String>());
+            println!(
+                "Offset to types[] (first 32 bytes): 0x{}",
+                encoded[0..32]
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>()
+            );
         }
         if encoded.len() >= 64 {
-            println!("Offset to bytes[] (next 32 bytes):  0x{}",
-                encoded[32..64].iter().map(|b| format!("{:02x}", b)).collect::<String>());
+            println!(
+                "Offset to bytes[] (next 32 bytes):  0x{}",
+                encoded[32..64]
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>()
+            );
         }
         if encoded.len() >= 96 {
-            println!("Start of types data (next 32 bytes): 0x{}",
-                encoded[64..96].iter().map(|b| format!("{:02x}", b)).collect::<String>());
+            println!(
+                "Start of types data (next 32 bytes): 0x{}",
+                encoded[64..96]
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>()
+            );
         }
         println!("\nExpected Solidity decode:");
-        println!("(StateUpdateType[] memory types, bytes[] memory args) = abi.decode(storageUpdates, (StateUpdateType[], bytes[]));");
+        println!(
+            "(StateUpdateType[] memory types, bytes[] memory args) = abi.decode(storageUpdates, (StateUpdateType[], bytes[]));"
+        );
         println!("============================================\n");
 
         Ok(())
