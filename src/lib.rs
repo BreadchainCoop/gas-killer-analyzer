@@ -932,9 +932,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_encoding_format() -> Result<()> {
-        // Test that encoding produces the correct format for Solidity consumption
-        // The bug was that StateUpdates::abi_encode wraps in an extra tuple layer
-
         // Create multiple state updates to match the chisel example
         let state_updates = vec![
             StateUpdate::Store(IStateUpdateTypes::Store {
