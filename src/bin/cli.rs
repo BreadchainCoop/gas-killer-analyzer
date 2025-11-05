@@ -62,7 +62,7 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
 
     match cmd {
         Some(Commands::Block(input)) => {
-            let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+            let provider = ProviderBuilder::new().connect(rpc_url.as_str()).await?;
             let identifier =
                 BlockId::from_str(input.as_ref()).expect("failed to parse block identifier");
             let all_receipts = provider
@@ -97,7 +97,7 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
             println!("successfully wrote data to {output_file}");
         }
         Some(Commands::Transaction(hash)) => {
-            let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+            let provider = ProviderBuilder::new().connect(rpc_url.as_str()).await?;
             let bytes: [u8; 32] = hex::const_decode_to_array(hash.as_bytes())
                 .expect("failed to decode transaction hash");
             let receipt = provider

@@ -5,11 +5,11 @@ use alloy_rpc_types::TransactionTrait;
 use anyhow::{Result, anyhow};
 
 /// Minimal transaction state extractor that reuses existing gas-analyzer-rs functionality
-pub struct TxStateExtractor<P: Provider + DebugApi> {
+pub struct TxStateExtractor<P: Provider + DebugApi<alloy::network::Ethereum>> {
     provider: P,
 }
 
-impl<P: Provider + DebugApi> TxStateExtractor<P> {
+impl<P: Provider + DebugApi<alloy::network::Ethereum>> TxStateExtractor<P> {
     /// Create a new extractor with the given provider
     pub fn new(provider: P) -> Self {
         Self { provider }
@@ -64,8 +64,10 @@ impl<P: Provider + DebugApi> TxStateExtractor<P> {
 }
 
 /// Convenience function to create an extractor from RPC URL
-pub fn from_rpc_url(rpc_url: &str) -> Result<TxStateExtractor<impl Provider + DebugApi>> {
-    let provider = ProviderBuilder::new().connect_http(rpc_url.parse()?);
+pub async fn from_rpc_url(
+    rpc_url: &str,
+) -> Result<TxStateExtractor<impl Provider + DebugApi<alloy::network::Ethereum>>> {
+    let provider = ProviderBuilder::new().connect(rpc_url).await?;
     Ok(TxStateExtractor::new(provider))
 }
 
