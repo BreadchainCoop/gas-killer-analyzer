@@ -533,18 +533,63 @@ mod tests {
             StateUpdate::Log0(IStateUpdateTypes::Log0 {
                 data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
             }),
+            StateUpdate::Log1(IStateUpdateTypes::Log1 {
+                data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
+                topic1: b256!("fd3dfbb3da06b2710848916c65866a3d0e050047402579a6e1714261137c19c6"),
+            }),
+        ];
+
+        let encoded = encode_state_updates_to_abi(&state_updates);
+        let (types, data) = decode_state_updates_tuple(&encoded)?;
+        assert_eq!(
+            types,
+            vec![U256::from(0u8), U256::from(2u8), U256::from(3u8),]
+        );
+        assert_eq!(data.len(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_encoding_format() -> Result<()> {
+        // Create multiple state updates to match the chisel example
+        let state_updates = vec![
+            StateUpdate::Store(IStateUpdateTypes::Store {
+                slot: b256!("debfdfd5a50ad117c10898d68b5ccf0893c6b40d4f443f902e2e7646601bdeaf"),
+                value: b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+            }),
+            StateUpdate::Log0(IStateUpdateTypes::Log0 {
+                data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
+            }),
+            StateUpdate::Log1(IStateUpdateTypes::Log1 {
+                data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
+                topic1: b256!("fd3dfbb3da06b2710848916c65866a3d0e050047402579a6e1714261137c19c6"),
+            }),
         ];
 
         let encoded = encode_state_updates_to_abi(&state_updates);
 
-        // Decode and verify round-trip
-        let (types, datas) = decode_state_updates_tuple(&encoded)?;
-
-        assert_eq!(types.len(), 2);
+        let (types, data) = decode_state_updates_tuple(&encoded)?;
+        assert_eq!(types.len(), 3, "Should have 3 state updates");
+        assert_eq!(data.len(), 3, "Should have 3 data entries");
         assert_eq!(types[0], U256::from(StateUpdateType::STORE as u8));
         assert_eq!(types[1], U256::from(StateUpdateType::LOG0 as u8));
+        assert_eq!(types[2], U256::from(StateUpdateType::LOG1 as u8));
 
-        assert_eq!(datas.len(), 2);
+        // Verify the encoding doesn't start with 0x20 (the extra wrapper)
+        // The first 32 bytes should be 0x40 (offset to types[]), not 0x20
+        if encoded.len() >= 32 {
+            let first_word = &encoded[0..32];
+            let is_wrapper = {
+                let mut expected = [0u8; 32];
+                expected[31] = 0x20;
+                first_word == expected
+            };
+            if is_wrapper {
+                bail!(
+                    "Encoding still has the extra wrapper! First 32 bytes should be the offset to types[] (0x40), not a wrapper (0x20)."
+                );
+            }
+        }
 
         Ok(())
     }
