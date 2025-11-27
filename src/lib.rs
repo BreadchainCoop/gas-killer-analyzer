@@ -10,7 +10,7 @@ use std::{collections::HashSet, str::FromStr};
 use structs::{GasKillerReport, Opcode, ReportDetails};
 
 use alloy::{
-    primitives::{Address, Bytes, FixedBytes, TxKind},
+    primitives::{Address, Bytes, FixedBytes, TxKind, U256},
     providers::{Provider, ProviderBuilder, ext::DebugApi},
     rpc::types::{
         TransactionReceipt,
@@ -25,7 +25,7 @@ use alloy::{
 use alloy_rpc_types::TransactionTrait;
 use anyhow::{Result, anyhow, bail};
 use gk::GasKillerDefault;
-use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType, StateUpdates};
+use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType};
 use url::Url;
 
 const TURETZKY_UPPER_GAS_LIMIT: u64 = 250000u64;
@@ -254,15 +254,116 @@ fn encode_state_updates_to_sol(
 
 fn encode_state_updates_to_abi(state_updates: &[StateUpdate]) -> Bytes {
     let (state_update_types, datas) = encode_state_updates_to_sol(state_updates);
-    let state_updates = StateUpdates {
-        types: state_update_types
-            .iter()
-            .map(|x| *x as u8)
-            .collect::<Vec<_>>(),
-        data: datas,
-    };
-    let encoded = StateUpdates::abi_encode(&state_updates);
+
+    // Encode as tuple (StateUpdateType[], bytes[])
+    fn write_u256_word(buf: &mut Vec<u8>, value: usize) {
+        let mut word = [0u8; 32];
+        let bytes = (value as u128).to_be_bytes();
+        word[32 - bytes.len()..].copy_from_slice(&bytes);
+        buf.extend_from_slice(&word);
+    }
+
+    fn pad32_len(len: usize) -> usize {
+        len.div_ceil(32) * 32
+    }
+
+    fn encode_bytes(value: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(32 + pad32_len(value.len()));
+        write_u256_word(&mut out, value.len());
+        out.extend_from_slice(value);
+        let padding = pad32_len(value.len()) - value.len();
+        if padding > 0 {
+            out.extend(std::iter::repeat_n(0u8, padding));
+        }
+        out
+    }
+
+    fn encode_bytes_array(values: &[Bytes]) -> Vec<u8> {
+        let n = values.len();
+        let encoded_elements: Vec<Vec<u8>> =
+            values.iter().map(|b| encode_bytes(b.as_ref())).collect();
+
+        let head_size = 32 * n;
+        let mut out = Vec::new();
+        write_u256_word(&mut out, n);
+
+        let mut running_offset = head_size;
+        for enc in &encoded_elements {
+            write_u256_word(&mut out, running_offset);
+            running_offset += enc.len();
+        }
+
+        for enc in encoded_elements {
+            out.extend_from_slice(&enc);
+        }
+
+        out
+    }
+
+    // Encode StateUpdateType[] (enum array - each enum is a full 32-byte word)
+    let mut types_payload = Vec::new();
+    write_u256_word(&mut types_payload, state_update_types.len()); // array length
+    for enum_val in &state_update_types {
+        write_u256_word(&mut types_payload, *enum_val as u8 as usize); // each enum as 32 bytes
+    }
+
+    // Encode bytes[]
+    let datas_payload = encode_bytes_array(&datas);
+
+    // Build tuple with two offsets
+    let offset_types = 0x40usize;
+    let offset_datas = offset_types + types_payload.len();
+
+    let mut encoded: Vec<u8> = Vec::with_capacity(64 + types_payload.len() + datas_payload.len());
+    write_u256_word(&mut encoded, offset_types);
+    write_u256_word(&mut encoded, offset_datas);
+    encoded.extend_from_slice(&types_payload);
+    encoded.extend_from_slice(&datas_payload);
+
     Bytes::copy_from_slice(&encoded)
+}
+
+// Decode (uint256[], bytes[]) ABI tuple used for state update transport
+#[allow(dead_code)]
+fn decode_state_updates_tuple(data: &[u8]) -> Result<(Vec<U256>, Vec<Bytes>)> {
+    fn read_u256_as_usize(word: &[u8]) -> usize {
+        let mut buf = [0u8; 16];
+        let copy_len = word.len().min(16);
+        buf[16 - copy_len..].copy_from_slice(&word[word.len() - copy_len..]);
+        u128::from_be_bytes(buf) as usize
+    }
+
+    fn get(data: &[u8], start: usize, len: usize) -> Result<&[u8]> {
+        if start + len > data.len() {
+            bail!("slice {}..{} of {}", start, start + len, data.len());
+        }
+        Ok(&data[start..start + len])
+    }
+
+    let types_offset = read_u256_as_usize(get(data, 0, 32)?);
+    let data_offset = read_u256_as_usize(get(data, 32, 32)?);
+
+    // types: uint256[]
+    let n_types = read_u256_as_usize(get(data, types_offset, 32)?);
+    let mut types = Vec::with_capacity(n_types);
+    for i in 0..n_types {
+        let word = get(data, types_offset + 32 + i * 32, 32)?;
+        types.push(U256::from_be_slice(word));
+    }
+
+    // data: bytes[]
+    let n_data = read_u256_as_usize(get(data, data_offset, 32)?);
+    let head = data_offset + 32;
+    let tail = head + 32 * n_data;
+    let mut out = Vec::with_capacity(n_data);
+    for i in 0..n_data {
+        let rel = read_u256_as_usize(get(data, head + i * 32, 32)?);
+        let start = tail + rel;
+        let len = read_u256_as_usize(get(data, start, 32)?);
+        out.push(Bytes::copy_from_slice(get(data, start + 32, len)?));
+    }
+
+    Ok((types, out))
 }
 
 pub async fn invokes_smart_contract(
@@ -421,7 +522,80 @@ mod tests {
     use csv::Writer;
     use sol_types::SimpleStorage;
 
+    #[test]
+    fn test_stateupdatetype_tuple_encoding() -> Result<()> {
+        // Test encoding as (StateUpdateType[], bytes[]) tuple
+        let state_updates = vec![
+            StateUpdate::Store(IStateUpdateTypes::Store {
+                slot: b256!("debfdfd5a50ad117c10898d68b5ccf0893c6b40d4f443f902e2e7646601bdeaf"),
+                value: b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+            }),
+            StateUpdate::Log0(IStateUpdateTypes::Log0 {
+                data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
+            }),
+            StateUpdate::Log1(IStateUpdateTypes::Log1 {
+                data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
+                topic1: b256!("fd3dfbb3da06b2710848916c65866a3d0e050047402579a6e1714261137c19c6"),
+            }),
+        ];
+
+        let encoded = encode_state_updates_to_abi(&state_updates);
+        let (types, data) = decode_state_updates_tuple(&encoded)?;
+        assert_eq!(
+            types,
+            vec![U256::from(0u8), U256::from(2u8), U256::from(3u8),]
+        );
+        assert_eq!(data.len(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_encoding_format() -> Result<()> {
+        // Create multiple state updates to match the chisel example
+        let state_updates = vec![
+            StateUpdate::Store(IStateUpdateTypes::Store {
+                slot: b256!("debfdfd5a50ad117c10898d68b5ccf0893c6b40d4f443f902e2e7646601bdeaf"),
+                value: b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+            }),
+            StateUpdate::Log0(IStateUpdateTypes::Log0 {
+                data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
+            }),
+            StateUpdate::Log1(IStateUpdateTypes::Log1 {
+                data: Bytes::from(vec![0x00, 0x00, 0x6f, 0xee]),
+                topic1: b256!("fd3dfbb3da06b2710848916c65866a3d0e050047402579a6e1714261137c19c6"),
+            }),
+        ];
+
+        let encoded = encode_state_updates_to_abi(&state_updates);
+
+        let (types, data) = decode_state_updates_tuple(&encoded)?;
+        assert_eq!(types.len(), 3, "Should have 3 state updates");
+        assert_eq!(data.len(), 3, "Should have 3 data entries");
+        assert_eq!(types[0], U256::from(StateUpdateType::STORE as u8));
+        assert_eq!(types[1], U256::from(StateUpdateType::LOG0 as u8));
+        assert_eq!(types[2], U256::from(StateUpdateType::LOG1 as u8));
+
+        // Verify the encoding doesn't start with 0x20 (the extra wrapper)
+        // The first 32 bytes should be 0x40 (offset to types[]), not 0x20
+        if encoded.len() >= 32 {
+            let first_word = &encoded[0..32];
+            let is_wrapper = {
+                let mut expected = [0u8; 32];
+                expected[31] = 0x20;
+                first_word == expected
+            };
+            if is_wrapper {
+                bail!(
+                    "Encoding still has the extra wrapper! First 32 bytes should be the offset to types[] (0x40), not a wrapper (0x20)."
+                );
+            }
+        }
+
+        Ok(())
+    }
+
     #[tokio::test]
+    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_csv_writer() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -441,6 +615,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_estimate_state_changes_gas_set() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -462,11 +637,12 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_estimate_state_changes_gas_access_control() -> Result<()> {
         dotenv::dotenv().ok();
 
         let rpc_url: Url = std::env::var("RPC_URL")
-            .expect("TESRPC_URLTNET_RPC_URL must be set")
+            .expect("RPC_URL must be set")
             .parse()?;
         let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
 
@@ -483,6 +659,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_estimate_state_changes_gas_access_control_failure() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -512,6 +689,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_set() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -555,6 +733,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_deposit() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -602,6 +781,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_delegatecall() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -667,6 +847,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -696,6 +877,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_update_simulate_call() -> Result<()> {
         dotenv::dotenv().ok();
 
