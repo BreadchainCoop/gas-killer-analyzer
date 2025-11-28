@@ -1,14 +1,10 @@
 # Technical Specification: ZK-Provable Slashing for Gas Killer AVS
 
-**Version:** 1.0
-**Status:** Draft
-**Last Updated:** November 28, 2025
-
 ## 1. Background
 
 ### Problem Statement
 
-Gas Killer (GK) operators execute EVM transactions off-chain and sign commitments to storage slot updates. Users call **target functions** (auto-generated wrappers) instead of **canonical functions** (the original Solidity functions), with operators signing the expected state changes. Currently, there is no trustless mechanism to verify that operators signed correct storage slot updates. If an operator signs incorrect updates (either maliciously or due to a bug), there is no way to:
+Gas Killer (GK) operators execute EVM transactions off-chain and sign commitments to storage slot updates. Users call **GK-optimized functions** (auto-generated wrappers that accept signed storage updates) instead of the original Solidity functions, with operators signing the expected state changes. Currently, there is no trustless mechanism to verify that operators signed correct storage slot updates. If an operator signs incorrect updates (either maliciously or due to a bug), there is no way to:
 
 - Prove on-chain that the signed storage updates were incorrect
 - Slash the operator's stake as penalty
@@ -32,27 +28,19 @@ Given a set of colluding validators (the _attacker_), we assume they can corrupt
 | Reference | Description |
 |-----------|-------------|
 | [Gas Killer](https://gaskiller.xyz) | Gas optimization AVS for EVM transactions |
-| [GK Architecture](https://www.canva.com/design/DAGhFbNxbGM/wNLvx0uDVPicY5tweLKDBQ/edit) | System design diagrams |
+| [GK Architecture](https://www.canva.com/design/DAG6AlR_SJY/2jaAqgRrDUepG6wznnw-5Q/edit?utm_content=DAG6AlR_SJY&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton) | System design diagrams |
 | EigenLayer AVS | Framework for restaking-based validated services |
 | [Relic Protocol](https://docs.relicprotocol.com/) | On-chain storage/transaction proof system |
-| [RISC Zero Zeth](https://risczero.com/zeth) | ZK EVM execution prover |
 | SP1 zkVM | RISC-V zkVM by Succinct Labs |
 | revm | Rust EVM implementation with Inspector trait |
-
-**Prior Art:**
-
-- Optimistic rollups use interactive bisection games (7-day challenge windows)
-- ZK rollups use validity proofs but require custom circuits
-- SP1/RISC Zero enable general-purpose ZK proofs over Rust programs
-- Relic Protocol provides proven storage slots and transaction inclusion on Ethereum mainnet
 
 ### Key Definitions
 
 | Term | Definition |
 |------|------------|
 | **Target Contract** | A contract with existing Solidity functions seeking gas savings via Gas Killer; typically subsidized by an institution |
-| **Canonical Function** | The original Solidity function a Gas Killer consumer wants to optimize |
-| **Target Function** | Auto-generated function replicating canonical function parameters, plus GK parameters (storage slot updates, external calls, events) |
+| **Original Function** | The existing Solidity function a Gas Killer consumer wants to optimize |
+| **GK-Optimized Function** | Auto-generated function replicating original function parameters, plus GK parameters (storage slot updates, external calls, events). Interchangeable with "target function" |
 | **Slashing Function** | Function that returns true to authorize slashing; accepts proofs of malicious behavior |
 | **Slasher** | An interested party willing to pay for and run slashing services |
 
@@ -63,8 +51,6 @@ Given a set of colluding validators (the _attacker_), we assume they can corrupt
 | GK Consumers | Deploy GK-compliant contracts | Gas savings, correct execution |
 | GK Operators | Execute transactions, sign storage updates | Avoid false slashing, minimize overhead |
 | Slashers | Monitor for fraud, submit challenges | Earn slashing rewards |
-| Protocol DAO | Governance | System security, parameter tuning |
-| EigenLayer | Infrastructure | Integration compatibility |
 
 ## 2. Motivation
 
@@ -82,13 +68,9 @@ As a slasher, I can submit a ZK proof that operators signed incorrect storage sl
 
 As a user, I don't need to stay online for a 7-day challenge period. Fraud can be proven in a single transaction.
 
-**Goal 4: Deterministic Canonical Execution**
+**Goal 4: Deterministic Execution**
 
-As an operator, I can compute the canonical storage slot updates for any transaction using open-source tooling, ensuring I won't be falsely slashed.
-
-**Goal 5: Gas-Efficient On-Chain Verification**
-
-As a slasher, I can verify a fraud proof on-chain for <500k gas, making challenges economically viable.
+As an operator, I can compute the correct storage slot updates for any transaction using open-source tooling, ensuring I won't be falsely slashed.
 
 ## 3. Scope and Approaches
 
@@ -96,7 +78,7 @@ As a slasher, I can verify a fraud proof on-chain for <500k gas, making challeng
 
 The slashing mechanism has several favorable properties:
 
-- Slashing may be expensive to invoke (acceptable tradeoff)
+- Slashing may be arbitrarily expensive to invoke (acceptable tradeoff)
 - Slashing process may be interactive (multi-step)
 - Slashing does not have to happen instantly
 - All slashing logic can be committed and deployed only when needed
@@ -109,10 +91,10 @@ The slashing mechanism has several favorable properties:
 For a valid slashing proof:
 
 1. The transaction must be proven to have been executed at some blockheight and transaction index
-2. The transaction must be proven to have called the target function of a canonical function
+2. The transaction must be proven to have called the GK-optimized function of an original function
 3. The storage layout of the contract at execution time must be proven
-4. The canonical function execution storage slot update results must be proven
-5. The signed (and executed) storage slot updates must be proven different from canonical execution
+4. The original function execution storage slot update results must be proven
+5. The signed (and executed) storage slot updates must be proven different from original execution
 
 ### Non-Goals
 
@@ -128,8 +110,8 @@ For a valid slashing proof:
 
 | Technical Functionality | Value | Tradeoffs |
 |------------------------|-------|-----------|
-| ZK-proven canonical execution | Cryptographic guarantee of correct storage updates | Proof generation latency (~10-60s) |
-| Single-tx fraud proofs | No interactive game, no challenge period | Higher slasher gas cost (~300-500k) |
+| ZK-proven execution | Cryptographic guarantee of correct storage updates | Proof generation latency (~10-60s) |
+| Single-tx fraud proofs | No interactive game, no challenge period | Higher slasher gas cost |
 | Relic Protocol integration | Proven storage slots and tx inclusion on mainnet | Mainnet-first, other chains need alternatives |
 | revm-based execution | Battle-tested EVM implementation | Tied to revm's correctness |
 | SP1/RISC Zero on-chain verifier | ~275k gas verification, EVM-native | Requires verifier contract deployment |
@@ -142,17 +124,16 @@ For a valid slashing proof:
 | Interactive Bisection (Cannon-style) | No proof generation, immediate challenge start | 7+ day challenge period, multiple txs |
 | On-chain EVM Interpreter | Fully on-chain | Millions of gas, impractical |
 | Optimistic with bonds | Simple, cheap happy path | Trust assumption during challenge window |
-| Non-ZK canonical execution proof | May be cheaper to implement | Potentially more expensive on-chain |
+| Non-ZK execution proof | May be cheaper to implement | Potentially more expensive on-chain |
 | RISC Zero vs SP1 | Similar capabilities | Different performance/cost profiles |
 
-**Note:** Per the original spec, if a non-ZK approach for proving canonical execution can be easily written, even if expensive, that is preferable to a ZK approach.
+**Note:** Per the original spec, if a non-ZK approach for proving execution can be easily written, even if expensive, that is preferable to a ZK approach.
 
 ### Relevant Metrics
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
 | Proof generation time | <60s for typical functions | Benchmark on reference hardware |
-| On-chain verification gas | <500k gas | Mainnet deployment test |
 | False positive rate | 0% | Formal verification of comparison logic |
 | Challenge success rate | 100% for valid challenges | Testnet simulations |
 | CoC/PfC ratio | >1 for all attack vectors | Economic modeling |
@@ -164,8 +145,8 @@ For a valid slashing proof:
 1. **GK Consumer** deploys a Gas Killer-compliant target contract
 2. **GK Consumer** commits a hash of slashing logic to the SlashingContract
 3. Target contract includes both:
-   - Original canonical functions
-   - Auto-generated target functions accepting GK parameters
+   - Original functions
+   - Auto-generated GK-optimized functions accepting signed storage updates
 
 ### 4.2 Main ("Happy") Path: Normal Execution
 
@@ -178,7 +159,7 @@ For a valid slashing proof:
 
 3. Each operator:
    - a. Loads contract bytecode + storage state at current block
-   - b. Simulates canonical function execution in revm
+   - b. Simulates original function execution in revm
    - c. Extracts expected storage slot updates
    - d. Signs the storage slot updates with their key
 
@@ -187,7 +168,7 @@ For a valid slashing proof:
    - b. Aggregates signatures (BLS if applicable)
 
 5. Aggregator submits to chain:
-   - a. Calls target function with signed storage slot updates
+   - a. Calls GK-optimized function with signed storage slot updates
    - b. Includes aggregated signature and operator bitmap
 
 6. Target contract:
@@ -196,7 +177,7 @@ For a valid slashing proof:
    - c. Emits events as specified
 
 7. **Post-condition:**
-   - Storage updates applied (gas saved vs canonical execution)
+   - Storage updates applied (gas saved vs original execution)
    - Transaction recorded for potential challenge
 
 ### 4.3 Fraud Proof Path: Slashing Invalid Execution
@@ -219,11 +200,11 @@ sequenceDiagram
     Slasher ->> SlashingContract: Provide Proof of Execution (Blockheight, Tx Index)
     SlashingContract ->> SlashingContract: Process Proof of Execution
 
-    Slasher ->> SlashingContract: Provide unhashed target function params, prove inclusion
+    Slasher ->> SlashingContract: Provide unhashed function params, prove inclusion
 
     Slasher ->> SlashingContract: Provide proof of Target Contract Storage Layout
 
-    Slasher ->> SlashingContract: Simulate Canonical Function Execution
+    Slasher ->> SlashingContract: Simulate Original Function Execution
     SlashingContract ->> SlashingContract: Calculate Expected Storage Slot Updates
     SlashingContract ->> SlashingContract: Compare expected vs signed updates
 
@@ -245,23 +226,23 @@ sequenceDiagram
    - Slasher provides proof of transaction execution at specific blockheight and tx index
    - Uses Relic Protocol or equivalent for Ethereum mainnet
 
-3. **Step 2: Prove Target Function Call**
-   - Slasher provides unhashed target function parameters
+3. **Step 2: Prove Function Call**
+   - Slasher provides unhashed function parameters
    - Proves these parameters are included in the proven transaction
 
 4. **Step 3: Prove Storage Layout**
    - Slasher provides proof of target contract storage layout at execution time
    - Uses Merkle proofs against block state root
 
-5. **Step 4: Prove Canonical Execution Result**
+5. **Step 4: Prove Original Execution Result**
    - **Option A (ZK):** Run SP1/RISC Zero prover with revm guest program
    - **Option B (Non-ZK):** On-chain simulation if gas-feasible
-   - Output: Expected storage slot updates from canonical function
+   - Output: Expected storage slot updates from original function
 
 6. **Step 5: Compare Results**
    - SlashingContract compares:
-     - Signed storage slot updates (from target function tx)
-     - Expected storage slot updates (from canonical simulation)
+     - Signed storage slot updates (from GK-optimized function tx)
+     - Expected storage slot updates (from original simulation)
 
 7. **Outcome:**
    - If match: Challenge fails, slasher loses bond
@@ -277,7 +258,7 @@ sequenceDiagram
 | A4 | Transaction already challenged | Revert with `AlreadyChallenged` | Prevent double-challenge |
 | A5 | Challenge window expired | Revert with `ChallengeWindowClosed` | Execution finalized |
 | A6 | Insufficient slasher bond | Revert with `InsufficientBond` | Must stake minimum |
-| A7 | Non-canonical target contract detected | Operators ignore request | Prevents malicious slashing setup |
+| A7 | Non-canonical contract detected | Operators ignore request | Prevents malicious slashing setup |
 | A8 | Operator already slashed | Skip slashing, reward slasher | Prevent double-slashing |
 | A9 | Proof generation timeout | Slasher cannot challenge | Increase resources or window |
 | A10 | revm version mismatch | Different results due to implementation | Pin exact revm version |
@@ -289,15 +270,15 @@ sequenceDiagram
 ```mermaid
 classDiagram
     class TargetContract {
-        +canonicalFunction(params)
-        +targetFunction(params, storageUpdates, signatures)
+        +originalFunction(params)
+        +gkOptimizedFunction(params, storageUpdates, signatures)
         +bytes32 slashingLogicHash
     }
 
     class SlashingContract {
         +mapping executionRecords
         +bytes32 slashingLogicHash
-        +challengeExecution(txProof, storageProof, canonicalProof)
+        +challengeExecution(txProof, storageProof, executionProof)
         +slash(operators)
     }
 
@@ -326,7 +307,7 @@ classDiagram
     }
 
     SlashingContract --> RelicProtocol : proves tx/storage
-    SlashingContract --> ZKProver : verifies canonical execution
+    SlashingContract --> ZKProver : verifies execution
     TargetContract --> SlashingContract : registered for slashing
     Operator --> TargetContract : submits executions
     Slasher --> SlashingContract : submits challenges
@@ -382,7 +363,7 @@ classDiagram
     class SlashingContract {
         -mapping~bytes32,ExecutionRecord~ executions
         -mapping~address,Operator~ operators
-        +challengeExecution(txProof, storageProof, canonicalProof)
+        +challengeExecution(txProof, storageProof, executionProof)
         +finalizeExecution(execId)
     }
 
@@ -409,11 +390,11 @@ classDiagram
     ExecutionRecord --> ExecutionStatus : has
 ```
 
-## 6. Proving Canonical Execution
+## 6. Proving Execution
 
 ### 6.1 Approach Selection
 
-Two approaches exist for proving canonical function execution:
+Two approaches exist for proving original function execution:
 
 **Option A: ZK Proof (SP1/RISC Zero)**
 - Run revm inside zkVM guest program
@@ -423,11 +404,11 @@ Two approaches exist for proving canonical function execution:
 
 **Option B: On-Chain Simulation**
 - Deploy EVM interpreter on-chain
-- Execute canonical function directly
+- Execute original function directly
 - Potentially millions of gas for complex functions
 - No off-chain proving required
 
-Per the original spec: "If a non-ZK approach can be easily written as opposed to a ZK one for proving canonical method execution, even if it is very expensive, that is preferable."
+Per the original spec: "If a non-ZK approach can be easily written as opposed to a ZK one for proving execution, even if it is very expensive, that is preferable."
 
 ### 6.2 ZK Guest Program Design
 
@@ -435,7 +416,7 @@ For the ZK approach, the guest program:
 
 1. **Inputs (private):**
    - Contract bytecode
-   - Calldata (canonical function params)
+   - Calldata (original function params)
    - Storage slots at execution time (with Merkle proofs)
 
 2. **Execution:**
@@ -463,11 +444,11 @@ For Ethereum mainnet, [Relic Protocol](https://docs.relicprotocol.com/developers
 
 | Edge Case | Description | Handling |
 |-----------|-------------|----------|
-| Complex canonical function | Large loops or many storage ops | May exceed ZK prover limits; set gas caps |
+| Complex original function | Large loops or many storage ops | May exceed ZK prover limits; set gas caps |
 | Storage slot not in witness | Execution accesses unproven storage | Guest reverts; slasher must provide complete witness |
 | Block reorg after execution | State changes due to reorg | Challenge must reference canonical block |
-| External calls in canonical | Canonical function calls other contracts | Requires expanded state witness |
-| Non-canonical target contract | Malicious contract designed to cause false slashing | Operators detect and ignore |
+| External calls in original | Original function calls other contracts | Requires expanded state witness |
+| Non-canonical contract | Malicious contract designed to cause false slashing | Operators detect and ignore |
 | Concurrent challenges | Multiple slashers submit proofs | First valid challenge wins; others refunded |
 
 ### 7.2 Design Concessions
@@ -476,7 +457,7 @@ For Ethereum mainnet, [Relic Protocol](https://docs.relicprotocol.com/developers
 |------------|-----------|--------|------------|
 | Mainnet-first | Relic Protocol available on Ethereum | Other chains need equivalent proofs | Multi-chain extension via signed blockhash |
 | Lazy slashing logic | Deploy only when needed | Requires upfront hash commitment | Standard practice, reduces deployment cost |
-| Slasher must front gas | Verification costs ~300-500k | Barrier for small challenges | Slasher pools; subsidized gas |
+| Slasher must front gas | Verification has gas costs | Barrier for small challenges | Slasher pools; subsidized gas |
 | Non-interactive proofs | Simpler than bisection games | Potentially higher one-time cost | ZK verification is efficient |
 
 ### 7.3 Known Limitations
@@ -508,9 +489,9 @@ For Ethereum mainnet, [Relic Protocol](https://docs.relicprotocol.com/developers
 | Term | Definition |
 |------|------------|
 | Gas Killer (GK) | AVS that optimizes gas by having operators sign expected state changes |
-| Target Contract | Contract deployed with GK-compliant target functions |
-| Canonical Function | Original Solidity function to be optimized |
-| Target Function | Auto-generated wrapper accepting signed storage updates |
+| Target Contract | Contract deployed with GK-compliant functions |
+| Original Function | Existing Solidity function to be optimized |
+| GK-Optimized Function | Auto-generated wrapper accepting signed storage updates (interchangeable with "target function") |
 | Slasher | Party who monitors and challenges malicious behavior |
 | CoC | Cost of Corruption - resources needed to attack |
 | PfC | Profit from Corruption - gains from successful attack |
@@ -528,7 +509,6 @@ For Ethereum mainnet, [Relic Protocol](https://docs.relicprotocol.com/developers
 | Gas Killer Solidity | https://github.com/BreadchainCoop/gas-killer-solidity |
 | Relic Protocol Docs | https://docs.relicprotocol.com |
 | Relic Contract Addresses | https://docs.relicprotocol.com/developers/contract-addresses/ |
-| RISC Zero Zeth | https://risczero.com/zeth |
 | SP1 Documentation | https://docs.succinct.xyz |
 | SP1 GitHub | https://github.com/succinctlabs/sp1 |
 | revm GitHub | https://github.com/bluealloy/revm |
@@ -559,8 +539,8 @@ pub struct SignedExecution {
     pub block_number: u64,
     /// Target contract
     pub target: [u8; 20],
-    /// Canonical function selector
-    pub canonical_selector: [u8; 4],
+    /// Original function selector
+    pub original_selector: [u8; 4],
     /// Calldata hash
     pub calldata_hash: [u8; 32],
     /// Storage updates
@@ -571,7 +551,7 @@ pub struct SignedExecution {
     pub events: Vec<EventLog>,
 }
 
-/// Compute canonical update commitment
+/// Compute update commitment
 pub fn compute_update_commitment(exec: &SignedExecution) -> [u8; 32] {
     keccak256(&bincode::serialize(exec).unwrap())
 }
@@ -581,9 +561,9 @@ pub fn compute_update_commitment(exec: &SignedExecution) -> [u8; 32] {
 
 | Operation | Estimated Gas | Notes |
 |-----------|---------------|-------|
-| Target function execution | ~50k + updates | Much cheaper than canonical |
+| GK-optimized function execution | ~50k + updates | Much cheaper than original |
 | Submit challenge (ZK) | ~350k | Proof verification + state reads |
-| Submit challenge (non-ZK) | Varies | Depends on canonical complexity |
+| Submit challenge (non-ZK) | Varies | Depends on original complexity |
 | Slash operators | ~50k per operator | Storage updates |
 | Finalize execution | ~30k | Status update |
 | Relic storage proof verification | ~50k per slot | Merkle proof verification |
