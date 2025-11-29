@@ -400,7 +400,7 @@ mod tests {
     use alloy::primitives::{U256, address, b256, bytes};
     use constants::*;
     use csv::Writer;
-    use sol_types::SimpleStorage;
+    use sol_types::{IStateUpdateTypes, SimpleStorage};
 
     #[test]
     fn test_stateupdatetype_tuple_encoding() -> Result<()> {
