@@ -1,6 +1,8 @@
 #[allow(dead_code)]
 mod constants;
 pub mod gk;
+#[cfg(test)]
+mod legacy_compare_tests;
 pub mod opcode_tracer;
 pub mod sol_types;
 pub mod structs;
