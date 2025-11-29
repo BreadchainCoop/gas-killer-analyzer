@@ -1,6 +1,7 @@
 #[allow(dead_code)]
 mod constants;
 pub mod gk;
+pub mod opcode_tracer;
 pub mod sol_types;
 pub mod structs;
 pub mod tx_extractor;
@@ -40,7 +41,7 @@ fn copy_memory(memory: &[u8], offset: usize, length: usize) -> Vec<u8> {
     }
 }
 
-fn parse_trace_memory(memory: Vec<String>) -> Vec<u8> {
+pub fn parse_trace_memory(memory: Vec<String>) -> Vec<u8> {
     memory
         .join("")
         .chars()
@@ -921,6 +922,197 @@ mod tests {
             log.topic1,
             b256!("0x9455957c3b77d1d4ed071e2b469dd77e37fc5dfd3b4d44dc8a997cc97c7b3d49")
         );
+        Ok(())
+    }
+
+    /// Test that compares state updates computed via the original Geth trace approach
+    /// with the new opcode tracer approach. Both should produce identical results.
+    ///
+    /// This test uses existing transaction hashes and requires the test contracts
+    /// to be deployed. Run with RPC_URL pointing to the network with deployed contracts.
+    #[tokio::test]
+    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
+    async fn test_compare_geth_trace_vs_opcode_tracer() -> Result<()> {
+        use crate::opcode_tracer::{
+            compute_state_updates_from_trace, convert_geth_trace_to_result,
+        };
+
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
+            .parse()?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
+
+        // Test with SimpleStorage set transaction
+        let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+
+        // Approach 1: Original Geth trace method
+        let (geth_state_updates, geth_skipped) = compute_state_updates(trace.clone()).await?;
+
+        // Approach 2: New opcode tracer method (converting Geth trace to our format)
+        let opcode_trace_result = convert_geth_trace_to_result(&trace);
+        let (tracer_state_updates, tracer_skipped) =
+            compute_state_updates_from_trace(&opcode_trace_result)?;
+
+        // Compare the results
+        assert_eq!(
+            geth_state_updates.len(),
+            tracer_state_updates.len(),
+            "Both approaches should produce the same number of state updates"
+        );
+
+        assert_eq!(
+            geth_skipped, tracer_skipped,
+            "Both approaches should skip the same opcodes"
+        );
+
+        // Compare each state update
+        for (i, (geth_update, tracer_update)) in geth_state_updates
+            .iter()
+            .zip(tracer_state_updates.iter())
+            .enumerate()
+        {
+            match (geth_update, tracer_update) {
+                (StateUpdate::Store(g), StateUpdate::Store(t)) => {
+                    assert_eq!(g.slot, t.slot, "Store slot mismatch at index {}", i);
+                    assert_eq!(g.value, t.value, "Store value mismatch at index {}", i);
+                }
+                (StateUpdate::Call(g), StateUpdate::Call(t)) => {
+                    assert_eq!(g.target, t.target, "Call target mismatch at index {}", i);
+                    assert_eq!(g.value, t.value, "Call value mismatch at index {}", i);
+                    assert_eq!(
+                        g.callargs, t.callargs,
+                        "Call args mismatch at index {}",
+                        i
+                    );
+                }
+                (StateUpdate::Log0(g), StateUpdate::Log0(t)) => {
+                    assert_eq!(g.data, t.data, "Log0 data mismatch at index {}", i);
+                }
+                (StateUpdate::Log1(g), StateUpdate::Log1(t)) => {
+                    assert_eq!(g.data, t.data, "Log1 data mismatch at index {}", i);
+                    assert_eq!(g.topic1, t.topic1, "Log1 topic1 mismatch at index {}", i);
+                }
+                (StateUpdate::Log2(g), StateUpdate::Log2(t)) => {
+                    assert_eq!(g.data, t.data, "Log2 data mismatch at index {}", i);
+                    assert_eq!(g.topic1, t.topic1, "Log2 topic1 mismatch at index {}", i);
+                    assert_eq!(g.topic2, t.topic2, "Log2 topic2 mismatch at index {}", i);
+                }
+                (StateUpdate::Log3(g), StateUpdate::Log3(t)) => {
+                    assert_eq!(g.data, t.data, "Log3 data mismatch at index {}", i);
+                    assert_eq!(g.topic1, t.topic1, "Log3 topic1 mismatch at index {}", i);
+                    assert_eq!(g.topic2, t.topic2, "Log3 topic2 mismatch at index {}", i);
+                    assert_eq!(g.topic3, t.topic3, "Log3 topic3 mismatch at index {}", i);
+                }
+                (StateUpdate::Log4(g), StateUpdate::Log4(t)) => {
+                    assert_eq!(g.data, t.data, "Log4 data mismatch at index {}", i);
+                    assert_eq!(g.topic1, t.topic1, "Log4 topic1 mismatch at index {}", i);
+                    assert_eq!(g.topic2, t.topic2, "Log4 topic2 mismatch at index {}", i);
+                    assert_eq!(g.topic3, t.topic3, "Log4 topic3 mismatch at index {}", i);
+                    assert_eq!(g.topic4, t.topic4, "Log4 topic4 mismatch at index {}", i);
+                }
+                _ => {
+                    panic!(
+                        "State update type mismatch at index {}: {:?} vs {:?}",
+                        i, geth_update, tracer_update
+                    );
+                }
+            }
+        }
+
+        println!(
+            "SUCCESS: Both approaches produced {} identical state updates",
+            geth_state_updates.len()
+        );
+
+        Ok(())
+    }
+
+    /// Test comparison with deposit transaction (includes LOG2)
+    #[tokio::test]
+    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
+    async fn test_compare_geth_trace_vs_opcode_tracer_deposit() -> Result<()> {
+        use crate::opcode_tracer::{
+            compute_state_updates_from_trace, convert_geth_trace_to_result,
+        };
+
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
+            .parse()?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
+
+        let tx_hash = SIMPLE_STORAGE_DEPOSIT_TX_HASH;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+
+        // Approach 1: Original Geth trace method
+        let (geth_state_updates, _) = compute_state_updates(trace.clone()).await?;
+
+        // Approach 2: New opcode tracer method
+        let opcode_trace_result = convert_geth_trace_to_result(&trace);
+        let (tracer_state_updates, _) =
+            compute_state_updates_from_trace(&opcode_trace_result)?;
+
+        assert_eq!(
+            geth_state_updates.len(),
+            tracer_state_updates.len(),
+            "Both approaches should produce the same number of state updates for deposit tx"
+        );
+
+        // Verify we get a Store and Log2
+        assert!(matches!(geth_state_updates[0], StateUpdate::Store(_)));
+        assert!(matches!(tracer_state_updates[0], StateUpdate::Store(_)));
+        assert!(matches!(geth_state_updates[1], StateUpdate::Log2(_)));
+        assert!(matches!(tracer_state_updates[1], StateUpdate::Log2(_)));
+
+        println!(
+            "SUCCESS: Deposit tx - both approaches produced {} identical state updates",
+            geth_state_updates.len()
+        );
+
+        Ok(())
+    }
+
+    /// Test comparison with delegatecall transaction
+    #[tokio::test]
+    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
+    async fn test_compare_geth_trace_vs_opcode_tracer_delegatecall() -> Result<()> {
+        use crate::opcode_tracer::{
+            compute_state_updates_from_trace, convert_geth_trace_to_result,
+        };
+
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
+            .parse()?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
+
+        let tx_hash = DELEGATECALL_CONTRACT_MAIN_RUN_TX_HASH;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+
+        // Approach 1: Original Geth trace method
+        let (geth_state_updates, _) = compute_state_updates(trace.clone()).await?;
+
+        // Approach 2: New opcode tracer method
+        let opcode_trace_result = convert_geth_trace_to_result(&trace);
+        let (tracer_state_updates, _) =
+            compute_state_updates_from_trace(&opcode_trace_result)?;
+
+        assert_eq!(
+            geth_state_updates.len(),
+            tracer_state_updates.len(),
+            "Both approaches should produce the same number of state updates for delegatecall tx"
+        );
+
+        println!(
+            "SUCCESS: Delegatecall tx - both approaches produced {} identical state updates",
+            geth_state_updates.len()
+        );
+
         Ok(())
     }
 }
