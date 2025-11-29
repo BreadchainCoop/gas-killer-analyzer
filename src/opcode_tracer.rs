@@ -4,11 +4,8 @@
 //! and provides utilities to compare state updates from both the Geth trace
 //! approach and the opcode tracer approach.
 
-use alloy::{
-    primitives::Address,
-    rpc::types::trace::geth::DefaultFrame,
-};
-use anyhow::{bail, Result};
+use alloy::{primitives::Address, rpc::types::trace::geth::DefaultFrame};
+use anyhow::{Result, bail};
 use std::collections::HashSet;
 
 use crate::sol_types::{IStateUpdateTypes, StateUpdate};
@@ -16,8 +13,8 @@ use crate::structs::Opcode;
 
 // Re-export the opcode-tracer crate types for external use
 pub use opcode_tracer::{
-    trace_call, trace_function, CallTraceArena, CallTraceNode, CallTraceStep, OpcodeExecution,
-    StorageChange, TraceConfig, TraceResult,
+    CallTraceArena, CallTraceNode, CallTraceStep, OpcodeExecution, StorageChange, TraceConfig,
+    TraceResult, trace_call, trace_function,
 };
 
 /// Compute state updates from an opcode-tracer TraceResult.
@@ -40,9 +37,7 @@ pub fn compute_state_updates_from_trace(
             // else, try to add the state update
             if step.name == "DELEGATECALL" || step.name == "CALLCODE" {
                 target_depth = depth + 1;
-            } else if let Some(opcode) =
-                append_state_update_from_step(&mut state_updates, step)?
-            {
+            } else if let Some(opcode) = append_state_update_from_step(&mut state_updates, step)? {
                 skipped_opcodes.insert(opcode);
             }
         }
@@ -214,7 +209,7 @@ pub fn convert_geth_trace_to_result(trace: &DefaultFrame) -> TraceResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::primitives::{b256, bytes, U256};
+    use alloy::primitives::{U256, b256, bytes};
 
     #[test]
     fn test_compute_state_updates_from_trace_sstore() {
@@ -284,8 +279,8 @@ mod tests {
                     topic,          // topic1
                 ],
                 memory: vec![
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 1,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 1,
                 ],
                 storage_change: None,
             }],

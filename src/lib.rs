@@ -982,11 +982,7 @@ mod tests {
                 (StateUpdate::Call(g), StateUpdate::Call(t)) => {
                     assert_eq!(g.target, t.target, "Call target mismatch at index {}", i);
                     assert_eq!(g.value, t.value, "Call value mismatch at index {}", i);
-                    assert_eq!(
-                        g.callargs, t.callargs,
-                        "Call args mismatch at index {}",
-                        i
-                    );
+                    assert_eq!(g.callargs, t.callargs, "Call args mismatch at index {}", i);
                 }
                 (StateUpdate::Log0(g), StateUpdate::Log0(t)) => {
                     assert_eq!(g.data, t.data, "Log0 data mismatch at index {}", i);
@@ -1053,8 +1049,7 @@ mod tests {
 
         // Approach 2: New opcode tracer method
         let opcode_trace_result = convert_geth_trace_to_result(&trace);
-        let (tracer_state_updates, _) =
-            compute_state_updates_from_trace(&opcode_trace_result)?;
+        let (tracer_state_updates, _) = compute_state_updates_from_trace(&opcode_trace_result)?;
 
         assert_eq!(
             geth_state_updates.len(),
@@ -1099,8 +1094,7 @@ mod tests {
 
         // Approach 2: New opcode tracer method
         let opcode_trace_result = convert_geth_trace_to_result(&trace);
-        let (tracer_state_updates, _) =
-            compute_state_updates_from_trace(&opcode_trace_result)?;
+        let (tracer_state_updates, _) = compute_state_updates_from_trace(&opcode_trace_result)?;
 
         assert_eq!(
             geth_state_updates.len(),
