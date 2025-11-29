@@ -21,7 +21,7 @@ impl<P: Provider + DebugApi> TxStateExtractor<P> {
         let trace = get_tx_trace(&self.provider, tx_hash).await?;
 
         // Use existing compute_state_updates function
-        let (state_updates, _skipped) = compute_state_updates(trace).await?;
+        let (state_updates, _skipped) = compute_state_updates(trace)?;
 
         Ok(state_updates)
     }
@@ -48,7 +48,7 @@ impl<P: Provider + DebugApi> TxStateExtractor<P> {
         }
 
         let trace = get_tx_trace(&self.provider, tx_hash).await?;
-        let (state_updates, _skipped) = compute_state_updates(trace).await?;
+        let (state_updates, _skipped) = compute_state_updates(trace)?;
 
         Ok(StateUpdateReport {
             tx_hash,

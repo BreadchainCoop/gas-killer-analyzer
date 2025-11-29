@@ -11,13 +11,13 @@ use std::{collections::HashSet, str::FromStr};
 use structs::{GasKillerReport, Opcode, ReportDetails};
 
 use alloy::{
-    primitives::{Address, Bytes, FixedBytes, TxKind, U256},
+    primitives::{Bytes, FixedBytes, TxKind, U256},
     providers::{Provider, ProviderBuilder, ext::DebugApi},
     rpc::types::{
         TransactionReceipt,
         eth::TransactionRequest,
         trace::geth::{
-            DefaultFrame, GethDebugTracingOptions, GethDefaultTracingOptions, GethTrace, StructLog,
+            DefaultFrame, GethDebugTracingOptions, GethDefaultTracingOptions, GethTrace,
         },
     },
     sol_types::SolValue,
@@ -26,20 +26,10 @@ use alloy::{
 use alloy_rpc_types::TransactionTrait;
 use anyhow::{Result, anyhow, bail};
 use gk::GasKillerDefault;
-use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType};
+use sol_types::{StateUpdate, StateUpdateType};
 use url::Url;
 
 const TURETZKY_UPPER_GAS_LIMIT: u64 = 250000u64;
-
-fn copy_memory(memory: &[u8], offset: usize, length: usize) -> Vec<u8> {
-    if memory.len() >= offset + length {
-        memory[offset..offset + length].to_vec()
-    } else {
-        let mut memory = memory.to_vec();
-        memory.resize(offset + length, 0);
-        memory[offset..offset + length].to_vec()
-    }
-}
 
 pub fn parse_trace_memory(memory: Vec<String>) -> Vec<u8> {
     memory
@@ -52,122 +42,11 @@ pub fn parse_trace_memory(memory: Vec<String>) -> Vec<u8> {
         .collect::<Vec<u8>>()
 }
 
-fn append_to_state_updates(
-    state_updates: &mut Vec<StateUpdate>,
-    struct_log: StructLog,
-) -> Result<Option<Opcode>> {
-    let mut stack = struct_log.stack.expect("stack is empty");
-    stack.reverse();
-    let memory = match struct_log.memory {
-        Some(memory) => parse_trace_memory(memory),
-        None => match struct_log.op.as_ref() {
-            "CALL" | "LOG0" | "LOG1" | "LOG2" | "LOG3" | "LOG4" if struct_log.depth == 1 => {
-                bail!("There is no memory for {:?} in depth 1", struct_log.op)
-            }
-            _ => return Ok(None),
-        },
-    };
-    match struct_log.op.as_ref() {
-        "CREATE" | "CREATE2" | "SELFDESTRUCT" => {
-            return Ok(Some(struct_log.op.to_string()));
-        }
-        "DELEGATECALL" | "CALLCODE" => {
-            bail!(
-                "Calling opcode {:?}, this shouldn't even happen!",
-                struct_log.op
-            );
-        }
-        "SSTORE" => state_updates.push(StateUpdate::Store(IStateUpdateTypes::Store {
-            slot: stack[0].into(),
-            value: stack[1].into(),
-        })),
-        "CALL" => {
-            let args_offset: usize = stack[3].try_into().expect("invalid args offset");
-            let args_length: usize = stack[4].try_into().expect("invalid args length");
-            let args = copy_memory(&memory, args_offset, args_length);
-            state_updates.push(StateUpdate::Call(IStateUpdateTypes::Call {
-                target: Address::from_word(stack[1].into()),
-                value: stack[2],
-                callargs: args.into(),
-            }));
-        }
-        "LOG0" => {
-            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
-            let data_length: usize = stack[1].try_into().expect("invalid data length");
-            let data = copy_memory(&memory, data_offset, data_length);
-            state_updates.push(StateUpdate::Log0(IStateUpdateTypes::Log0 {
-                data: data.into(),
-            }));
-        }
-        "LOG1" => {
-            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
-            let data_length: usize = stack[1].try_into().expect("invalid data length");
-            let data = copy_memory(&memory, data_offset, data_length);
-            state_updates.push(StateUpdate::Log1(IStateUpdateTypes::Log1 {
-                data: data.into(),
-                topic1: stack[2].into(),
-            }));
-        }
-        "LOG2" => {
-            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
-            let data_length: usize = stack[1].try_into().expect("invalid data length");
-            let data = copy_memory(&memory, data_offset, data_length);
-            state_updates.push(StateUpdate::Log2(IStateUpdateTypes::Log2 {
-                data: data.into(),
-                topic1: stack[2].into(),
-                topic2: stack[3].into(),
-            }));
-        }
-        "LOG3" => {
-            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
-            let data_length: usize = stack[1].try_into().expect("invalid data length");
-            let data = copy_memory(&memory, data_offset, data_length);
-            state_updates.push(StateUpdate::Log3(IStateUpdateTypes::Log3 {
-                data: data.into(),
-                topic1: stack[2].into(),
-                topic2: stack[3].into(),
-                topic3: stack[4].into(),
-            }));
-        }
-        "LOG4" => {
-            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
-            let data_length: usize = stack[1].try_into().expect("invalid data length");
-            let data = copy_memory(&memory, data_offset, data_length);
-            state_updates.push(StateUpdate::Log4(IStateUpdateTypes::Log4 {
-                data: data.into(),
-                topic1: stack[2].into(),
-                topic2: stack[3].into(),
-                topic3: stack[4].into(),
-                topic4: stack[5].into(),
-            }));
-        }
-        _ => {}
-    }
-    Ok(None)
-}
-
-pub async fn compute_state_updates(
-    trace: DefaultFrame,
-) -> Result<(Vec<StateUpdate>, HashSet<Opcode>)> {
-    let mut state_updates: Vec<StateUpdate> = Vec::new();
-    // depth for which we care about state updates happening in
-    let mut target_depth = 1;
-    let mut skipped_opcodes = HashSet::new();
-    for struct_log in trace.struct_logs {
-        // Whenever stepping up (leaving a CALL/CALLCODE/DELEGATECALL) reset the target depth
-        if struct_log.depth < target_depth {
-            target_depth = struct_log.depth;
-        } else if struct_log.depth == target_depth {
-            // If we're going to step into a new execution context, increase the target depth
-            // else, try to add the state update
-            if &*struct_log.op == "DELEGATECALL" || &*struct_log.op == "CALLCODE" {
-                target_depth = struct_log.depth + 1;
-            } else if let Some(opcode) = append_to_state_updates(&mut state_updates, struct_log)? {
-                skipped_opcodes.insert(opcode);
-            }
-        }
-    }
-    Ok((state_updates, skipped_opcodes))
+/// Compute state updates from a Geth trace.
+/// This converts the trace to the opcode-tracer format and uses the unified implementation.
+pub fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpdate>, HashSet<Opcode>)> {
+    let opcode_trace = opcode_tracer::convert_geth_trace_to_result(&trace);
+    opcode_tracer::compute_state_updates_from_trace(&opcode_trace)
 }
 
 pub async fn get_tx_trace<P: Provider>(
@@ -462,7 +341,7 @@ pub async fn gaskiller_reporter(
         .await?
         .ok_or_else(|| anyhow!("could not get receipt for tx {}", tx_hash))?;
     let trace = get_tx_trace(&provider, tx_hash).await?;
-    let (state_updates, opcodes) = compute_state_updates(trace).await?;
+    let (state_updates, opcodes) = compute_state_updates(trace)?;
     let skipped_opcodes = opcodes.into_iter().collect::<Vec<_>>().join(", ");
     let gaskiller_gas_estimate = gk
         .estimate_state_changes_gas(
@@ -502,7 +381,7 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
         })
         .ok_or_else(|| anyhow!("receipt does not have to address"))?;
     let trace = get_trace_from_call(url, tx_request).await?;
-    let (state_updates, skipped_opcodes) = compute_state_updates(trace).await?;
+    let (state_updates, skipped_opcodes) = compute_state_updates(trace)?;
     let gas_estimate = gk
         .estimate_state_changes_gas(contract_address, &state_updates)
         .await?;
@@ -627,7 +506,7 @@ mod tests {
 
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
-        let (state_updates, _) = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace)?;
 
         let gk = GasKillerDefault::new(rpc_url, None).await?;
         let gas_estimate = gk
@@ -649,7 +528,7 @@ mod tests {
 
         let tx_hash = ACCESS_CONTROL_MAIN_RUN_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
-        let (state_updates, _) = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace)?;
 
         let gk = GasKillerDefault::new(rpc_url, None).await?;
         let gas_estimate = gk
@@ -671,7 +550,7 @@ mod tests {
 
         let tx_hash = ACCESS_CONTROL_MAIN_RUN_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
-        let (state_updates, _) = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace)?;
 
         let gk = GasKillerDefault::new(rpc_url, None).await?;
         let gas_estimate = gk
@@ -701,7 +580,7 @@ mod tests {
 
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
-        let (state_updates, _) = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace)?;
 
         assert_eq!(state_updates.len(), 2);
         assert!(matches!(state_updates[0], StateUpdate::Store(_)));
@@ -745,7 +624,7 @@ mod tests {
 
         let tx_hash = SIMPLE_STORAGE_DEPOSIT_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
-        let (state_updates, _) = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace)?;
 
         assert_eq!(state_updates.len(), 2);
         assert!(matches!(state_updates[0], StateUpdate::Store(_)));
@@ -793,7 +672,7 @@ mod tests {
 
         let tx_hash = DELEGATECALL_CONTRACT_MAIN_RUN_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
-        let (state_updates, _) = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace)?;
 
         assert_eq!(state_updates.len(), 4);
         let StateUpdate::Store(IStateUpdateTypes::Store { slot, value }) = &state_updates[0] else {
@@ -859,7 +738,7 @@ mod tests {
 
         let tx_hash = SIMPLE_STORAGE_CALL_EXTERNAL_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
-        let (state_updates, _) = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace)?;
 
         assert_eq!(state_updates.len(), 1);
         assert!(matches!(state_updates[0], StateUpdate::Call(_)));
@@ -893,7 +772,7 @@ mod tests {
         let tx_request = simple_storage.set(U256::from(1)).into_transaction_request();
 
         let trace = get_trace_from_call(rpc_url, tx_request).await?;
-        let (state_updates, _) = compute_state_updates(trace).await?;
+        let (state_updates, _) = compute_state_updates(trace)?;
 
         assert_eq!(state_updates.len(), 2);
         assert!(matches!(state_updates[0], StateUpdate::Store(_)));
@@ -922,191 +801,6 @@ mod tests {
             log.topic1,
             b256!("0x9455957c3b77d1d4ed071e2b469dd77e37fc5dfd3b4d44dc8a997cc97c7b3d49")
         );
-        Ok(())
-    }
-
-    /// Test that compares state updates computed via the original Geth trace approach
-    /// with the new opcode tracer approach. Both should produce identical results.
-    ///
-    /// This test uses existing transaction hashes and requires the test contracts
-    /// to be deployed. Run with RPC_URL pointing to the network with deployed contracts.
-    #[tokio::test]
-    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
-    async fn test_compare_geth_trace_vs_opcode_tracer() -> Result<()> {
-        use crate::opcode_tracer::{
-            compute_state_updates_from_trace, convert_geth_trace_to_result,
-        };
-
-        dotenv::dotenv().ok();
-
-        let rpc_url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
-            .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
-
-        // Test with SimpleStorage set transaction
-        let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
-        let trace = get_tx_trace(&provider, tx_hash).await?;
-
-        // Approach 1: Original Geth trace method
-        let (geth_state_updates, geth_skipped) = compute_state_updates(trace.clone()).await?;
-
-        // Approach 2: New opcode tracer method (converting Geth trace to our format)
-        let opcode_trace_result = convert_geth_trace_to_result(&trace);
-        let (tracer_state_updates, tracer_skipped) =
-            compute_state_updates_from_trace(&opcode_trace_result)?;
-
-        // Compare the results
-        assert_eq!(
-            geth_state_updates.len(),
-            tracer_state_updates.len(),
-            "Both approaches should produce the same number of state updates"
-        );
-
-        assert_eq!(
-            geth_skipped, tracer_skipped,
-            "Both approaches should skip the same opcodes"
-        );
-
-        // Compare each state update
-        for (i, (geth_update, tracer_update)) in geth_state_updates
-            .iter()
-            .zip(tracer_state_updates.iter())
-            .enumerate()
-        {
-            match (geth_update, tracer_update) {
-                (StateUpdate::Store(g), StateUpdate::Store(t)) => {
-                    assert_eq!(g.slot, t.slot, "Store slot mismatch at index {}", i);
-                    assert_eq!(g.value, t.value, "Store value mismatch at index {}", i);
-                }
-                (StateUpdate::Call(g), StateUpdate::Call(t)) => {
-                    assert_eq!(g.target, t.target, "Call target mismatch at index {}", i);
-                    assert_eq!(g.value, t.value, "Call value mismatch at index {}", i);
-                    assert_eq!(g.callargs, t.callargs, "Call args mismatch at index {}", i);
-                }
-                (StateUpdate::Log0(g), StateUpdate::Log0(t)) => {
-                    assert_eq!(g.data, t.data, "Log0 data mismatch at index {}", i);
-                }
-                (StateUpdate::Log1(g), StateUpdate::Log1(t)) => {
-                    assert_eq!(g.data, t.data, "Log1 data mismatch at index {}", i);
-                    assert_eq!(g.topic1, t.topic1, "Log1 topic1 mismatch at index {}", i);
-                }
-                (StateUpdate::Log2(g), StateUpdate::Log2(t)) => {
-                    assert_eq!(g.data, t.data, "Log2 data mismatch at index {}", i);
-                    assert_eq!(g.topic1, t.topic1, "Log2 topic1 mismatch at index {}", i);
-                    assert_eq!(g.topic2, t.topic2, "Log2 topic2 mismatch at index {}", i);
-                }
-                (StateUpdate::Log3(g), StateUpdate::Log3(t)) => {
-                    assert_eq!(g.data, t.data, "Log3 data mismatch at index {}", i);
-                    assert_eq!(g.topic1, t.topic1, "Log3 topic1 mismatch at index {}", i);
-                    assert_eq!(g.topic2, t.topic2, "Log3 topic2 mismatch at index {}", i);
-                    assert_eq!(g.topic3, t.topic3, "Log3 topic3 mismatch at index {}", i);
-                }
-                (StateUpdate::Log4(g), StateUpdate::Log4(t)) => {
-                    assert_eq!(g.data, t.data, "Log4 data mismatch at index {}", i);
-                    assert_eq!(g.topic1, t.topic1, "Log4 topic1 mismatch at index {}", i);
-                    assert_eq!(g.topic2, t.topic2, "Log4 topic2 mismatch at index {}", i);
-                    assert_eq!(g.topic3, t.topic3, "Log4 topic3 mismatch at index {}", i);
-                    assert_eq!(g.topic4, t.topic4, "Log4 topic4 mismatch at index {}", i);
-                }
-                _ => {
-                    panic!(
-                        "State update type mismatch at index {}: {:?} vs {:?}",
-                        i, geth_update, tracer_update
-                    );
-                }
-            }
-        }
-
-        println!(
-            "SUCCESS: Both approaches produced {} identical state updates",
-            geth_state_updates.len()
-        );
-
-        Ok(())
-    }
-
-    /// Test comparison with deposit transaction (includes LOG2)
-    #[tokio::test]
-    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
-    async fn test_compare_geth_trace_vs_opcode_tracer_deposit() -> Result<()> {
-        use crate::opcode_tracer::{
-            compute_state_updates_from_trace, convert_geth_trace_to_result,
-        };
-
-        dotenv::dotenv().ok();
-
-        let rpc_url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
-            .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
-
-        let tx_hash = SIMPLE_STORAGE_DEPOSIT_TX_HASH;
-        let trace = get_tx_trace(&provider, tx_hash).await?;
-
-        // Approach 1: Original Geth trace method
-        let (geth_state_updates, _) = compute_state_updates(trace.clone()).await?;
-
-        // Approach 2: New opcode tracer method
-        let opcode_trace_result = convert_geth_trace_to_result(&trace);
-        let (tracer_state_updates, _) = compute_state_updates_from_trace(&opcode_trace_result)?;
-
-        assert_eq!(
-            geth_state_updates.len(),
-            tracer_state_updates.len(),
-            "Both approaches should produce the same number of state updates for deposit tx"
-        );
-
-        // Verify we get a Store and Log2
-        assert!(matches!(geth_state_updates[0], StateUpdate::Store(_)));
-        assert!(matches!(tracer_state_updates[0], StateUpdate::Store(_)));
-        assert!(matches!(geth_state_updates[1], StateUpdate::Log2(_)));
-        assert!(matches!(tracer_state_updates[1], StateUpdate::Log2(_)));
-
-        println!(
-            "SUCCESS: Deposit tx - both approaches produced {} identical state updates",
-            geth_state_updates.len()
-        );
-
-        Ok(())
-    }
-
-    /// Test comparison with delegatecall transaction
-    #[tokio::test]
-    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
-    async fn test_compare_geth_trace_vs_opcode_tracer_delegatecall() -> Result<()> {
-        use crate::opcode_tracer::{
-            compute_state_updates_from_trace, convert_geth_trace_to_result,
-        };
-
-        dotenv::dotenv().ok();
-
-        let rpc_url = std::env::var("RPC_URL")
-            .expect("RPC_URL must be set")
-            .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
-
-        let tx_hash = DELEGATECALL_CONTRACT_MAIN_RUN_TX_HASH;
-        let trace = get_tx_trace(&provider, tx_hash).await?;
-
-        // Approach 1: Original Geth trace method
-        let (geth_state_updates, _) = compute_state_updates(trace.clone()).await?;
-
-        // Approach 2: New opcode tracer method
-        let opcode_trace_result = convert_geth_trace_to_result(&trace);
-        let (tracer_state_updates, _) = compute_state_updates_from_trace(&opcode_trace_result)?;
-
-        assert_eq!(
-            geth_state_updates.len(),
-            tracer_state_updates.len(),
-            "Both approaches should produce the same number of state updates for delegatecall tx"
-        );
-
-        println!(
-            "SUCCESS: Delegatecall tx - both approaches produced {} identical state updates",
-            geth_state_updates.len()
-        );
-
         Ok(())
     }
 }
