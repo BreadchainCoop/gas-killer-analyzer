@@ -215,9 +215,16 @@ mod tests {
     }
 
     /// Test comparing legacy vs new implementation for DELEGATECALL transaction.
+    /// This is a complex test with multiple state updates at different depths:
+    /// - 4 SSTORE operations (some inside DELEGATECALL context)
+    /// - 1 CALL operation
+    /// - 2 DELEGATECALL operations (which should be skipped, not captured as state updates)
     #[tokio::test]
     #[ignore = "requires RPC_URL with pre-deployed test contracts"]
     async fn test_compare_delegatecall() -> Result<()> {
+        use crate::sol_types::IStateUpdateTypes;
+        use alloy::primitives::b256;
+
         dotenv::dotenv().ok();
 
         let rpc_url = std::env::var("RPC_URL")
@@ -238,8 +245,35 @@ mod tests {
         compare_state_updates(&legacy_updates, &new_updates)?;
         assert_eq!(legacy_skipped, new_skipped, "Skipped opcodes mismatch");
 
+        // Verify we got exactly 4 state updates (3 SSTOREs + 1 CALL, filtered by depth)
+        assert_eq!(legacy_updates.len(), 4, "Expected 4 state updates");
+        assert_eq!(new_updates.len(), 4, "Expected 4 state updates");
+
+        // Verify the types are correct: Store, Call, Store, Store
+        assert!(matches!(legacy_updates[0], StateUpdate::Store(_)));
+        assert!(matches!(legacy_updates[1], StateUpdate::Call(_)));
+        assert!(matches!(legacy_updates[2], StateUpdate::Store(_)));
+        assert!(matches!(legacy_updates[3], StateUpdate::Store(_)));
+
+        // Verify specific values for the first SSTORE
+        if let StateUpdate::Store(IStateUpdateTypes::Store { slot, value }) = &legacy_updates[0] {
+            assert_eq!(
+                slot,
+                &b256!("0x0000000000000000000000000000000000000000000000000000000000000003")
+            );
+            assert_eq!(
+                value,
+                &b256!("0x0000000000000000000000000000000000000000000000000000000000000001")
+            );
+        }
+
+        // Verify the CALL target
+        if let StateUpdate::Call(IStateUpdateTypes::Call { target, .. }) = &legacy_updates[1] {
+            assert_eq!(target, &DELEGATE_CONTRACT_A_ADDRESS);
+        }
+
         println!(
-            "SUCCESS: DELEGATECALL - both implementations produced {} identical state updates",
+            "SUCCESS: DELEGATECALL - both implementations produced {} identical state updates (3 Stores + 1 Call)",
             legacy_updates.len()
         );
 
@@ -340,6 +374,39 @@ mod tests {
 
         println!(
             "SUCCESS: AccessControl - both implementations produced {} identical state updates",
+            legacy_updates.len()
+        );
+
+        Ok(())
+    }
+
+    /// Test comparing legacy vs new implementation for array iteration transaction.
+    /// This is a more complex test case with multiple SSTORE operations.
+    #[tokio::test]
+    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
+    async fn test_compare_array_iteration() -> Result<()> {
+        dotenv::dotenv().ok();
+
+        let rpc_url = std::env::var("RPC_URL")
+            .expect("RPC_URL must be set")
+            .parse()?;
+        let provider = ProviderBuilder::new().connect_http(rpc_url);
+
+        let tx_hash = SIMPLE_ARRAY_ITERATION_TX_HASH;
+        let trace = get_tx_trace(&provider, tx_hash).await?;
+
+        // Run legacy implementation
+        let (legacy_updates, legacy_skipped) = compute_state_updates_legacy(trace.clone())?;
+
+        // Run new implementation
+        let (new_updates, new_skipped) = compute_state_updates(trace)?;
+
+        // Compare results
+        compare_state_updates(&legacy_updates, &new_updates)?;
+        assert_eq!(legacy_skipped, new_skipped, "Skipped opcodes mismatch");
+
+        println!(
+            "SUCCESS: Array iteration - both implementations produced {} identical state updates",
             legacy_updates.len()
         );
 
