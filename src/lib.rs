@@ -47,6 +47,7 @@ pub fn parse_trace_memory(memory: Vec<String>) -> Vec<u8> {
 /// Compute state updates from a Geth trace.
 /// This converts the trace to the opcode-tracer format and uses the unified implementation.
 pub fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpdate>, HashSet<Opcode>)> {
+    eprintln!("[gas-analyzer] Using opcode-tracer-compare branch");
     let opcode_trace = opcode_tracer::convert_geth_trace_to_result(&trace);
     opcode_tracer::compute_state_updates_from_trace(&opcode_trace)
 }
