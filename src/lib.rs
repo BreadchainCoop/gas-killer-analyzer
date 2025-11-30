@@ -51,6 +51,146 @@ pub fn compute_state_updates(trace: DefaultFrame) -> Result<(Vec<StateUpdate>, H
     opcode_tracer::compute_state_updates_from_trace(&opcode_trace)
 }
 
+// =============================================================================
+// Legacy Implementation (kept for comparison tests)
+// =============================================================================
+
+/// Copy memory with bounds checking (legacy helper).
+#[cfg(test)]
+fn copy_memory_legacy(memory: &[u8], offset: usize, length: usize) -> Vec<u8> {
+    if memory.len() >= offset + length {
+        memory[offset..offset + length].to_vec()
+    } else {
+        let mut memory = memory.to_vec();
+        memory.resize(offset + length, 0);
+        memory[offset..offset + length].to_vec()
+    }
+}
+
+/// Legacy implementation: append state update from a struct log.
+#[cfg(test)]
+fn append_to_state_updates_legacy(
+    state_updates: &mut Vec<StateUpdate>,
+    struct_log: alloy::rpc::types::trace::geth::StructLog,
+) -> Result<Option<Opcode>> {
+    use alloy::primitives::Address;
+    use sol_types::IStateUpdateTypes;
+
+    let mut stack = struct_log.stack.expect("stack is empty");
+    stack.reverse();
+    let memory = match struct_log.memory {
+        Some(memory) => parse_trace_memory(memory),
+        None => match struct_log.op.as_ref() {
+            "CALL" | "LOG0" | "LOG1" | "LOG2" | "LOG3" | "LOG4" if struct_log.depth == 1 => {
+                bail!("There is no memory for {:?} in depth 1", struct_log.op)
+            }
+            _ => return Ok(None),
+        },
+    };
+    match struct_log.op.as_ref() {
+        "CREATE" | "CREATE2" | "SELFDESTRUCT" => {
+            return Ok(Some(struct_log.op.to_string()));
+        }
+        "DELEGATECALL" | "CALLCODE" => {
+            bail!(
+                "Calling opcode {:?}, this shouldn't even happen!",
+                struct_log.op
+            );
+        }
+        "SSTORE" => state_updates.push(StateUpdate::Store(IStateUpdateTypes::Store {
+            slot: stack[0].into(),
+            value: stack[1].into(),
+        })),
+        "CALL" => {
+            let args_offset: usize = stack[3].try_into().expect("invalid args offset");
+            let args_length: usize = stack[4].try_into().expect("invalid args length");
+            let args = copy_memory_legacy(&memory, args_offset, args_length);
+            state_updates.push(StateUpdate::Call(IStateUpdateTypes::Call {
+                target: Address::from_word(stack[1].into()),
+                value: stack[2],
+                callargs: args.into(),
+            }));
+        }
+        "LOG0" => {
+            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
+            let data_length: usize = stack[1].try_into().expect("invalid data length");
+            let data = copy_memory_legacy(&memory, data_offset, data_length);
+            state_updates.push(StateUpdate::Log0(IStateUpdateTypes::Log0 {
+                data: data.into(),
+            }));
+        }
+        "LOG1" => {
+            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
+            let data_length: usize = stack[1].try_into().expect("invalid data length");
+            let data = copy_memory_legacy(&memory, data_offset, data_length);
+            state_updates.push(StateUpdate::Log1(IStateUpdateTypes::Log1 {
+                data: data.into(),
+                topic1: stack[2].into(),
+            }));
+        }
+        "LOG2" => {
+            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
+            let data_length: usize = stack[1].try_into().expect("invalid data length");
+            let data = copy_memory_legacy(&memory, data_offset, data_length);
+            state_updates.push(StateUpdate::Log2(IStateUpdateTypes::Log2 {
+                data: data.into(),
+                topic1: stack[2].into(),
+                topic2: stack[3].into(),
+            }));
+        }
+        "LOG3" => {
+            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
+            let data_length: usize = stack[1].try_into().expect("invalid data length");
+            let data = copy_memory_legacy(&memory, data_offset, data_length);
+            state_updates.push(StateUpdate::Log3(IStateUpdateTypes::Log3 {
+                data: data.into(),
+                topic1: stack[2].into(),
+                topic2: stack[3].into(),
+                topic3: stack[4].into(),
+            }));
+        }
+        "LOG4" => {
+            let data_offset: usize = stack[0].try_into().expect("invalid data offset");
+            let data_length: usize = stack[1].try_into().expect("invalid data length");
+            let data = copy_memory_legacy(&memory, data_offset, data_length);
+            state_updates.push(StateUpdate::Log4(IStateUpdateTypes::Log4 {
+                data: data.into(),
+                topic1: stack[2].into(),
+                topic2: stack[3].into(),
+                topic3: stack[4].into(),
+                topic4: stack[5].into(),
+            }));
+        }
+        _ => {}
+    }
+    Ok(None)
+}
+
+/// Legacy implementation: compute state updates from a Geth trace.
+/// This is the original implementation before the opcode-tracer refactor.
+#[cfg(test)]
+pub fn compute_state_updates_legacy(
+    trace: DefaultFrame,
+) -> Result<(Vec<StateUpdate>, HashSet<Opcode>)> {
+    let mut state_updates: Vec<StateUpdate> = Vec::new();
+    let mut target_depth = 1;
+    let mut skipped_opcodes = HashSet::new();
+    for struct_log in trace.struct_logs {
+        if struct_log.depth < target_depth {
+            target_depth = struct_log.depth;
+        } else if struct_log.depth == target_depth {
+            if &*struct_log.op == "DELEGATECALL" || &*struct_log.op == "CALLCODE" {
+                target_depth = struct_log.depth + 1;
+            } else if let Some(opcode) =
+                append_to_state_updates_legacy(&mut state_updates, struct_log)?
+            {
+                skipped_opcodes.insert(opcode);
+            }
+        }
+    }
+    Ok((state_updates, skipped_opcodes))
+}
+
 pub async fn get_tx_trace<P: Provider>(
     provider: &P,
     tx_hash: FixedBytes<32>,
