@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# Upgrade alloy to 1.0.37 to match opcode-tracer's reth 1.9.1 requirements
 alloy = { version = "1.0.37", features = [
     "sol-types",
     "contract",
@@ -14,26 +13,25 @@ alloy = { version = "1.0.37", features = [
     "json-rpc",
 ] }
 alloy-dyn-abi = "1.0.37"
-alloy-rpc-types = { version = "1.0.37", features = ["trace"] }
+alloy-eips = "1.0.37"
 alloy-provider = { version = "1.0.37", features = ["debug-api"] }
-anyhow = "1.0.98"
-tokio = { version = "1.45.1", features = ["rt-multi-thread"] }
-url = "2.5.4"
-dotenv = "0.15.0"
+alloy-rpc-types = { version = "1.0.37", features = ["trace"] }
 alloy-sol-types = "1.0.37"
+anyhow = "1.0.98"
+chrono = { version = "0.4.41", features = ["clock", "serde"] }
 clap = "4.5.40"
 clap_derive = "4.5.32"
-serde_json = "1.0"
-alloy-eips = "1.0.37"
-env = "1.0.1"
 colored = "3.0.0"
 csv = "1.3.1"
-serde_derive = "1.0.219"
-serde = "1.0.219"
-chrono = { version = "0.4.41", features = ["clock", "serde"] }
+dotenv = "0.15.0"
+env = "1.0.1"
 foundry-evm-traces = { git = "https://github.com/foundry-rs/foundry", package = "foundry-evm-traces", branch = "master" }
 opcode-tracer = { git = "https://github.com/BreadchainCoop/sp1-contract-call", branch = "cancun-v1", package = "opcode-tracer" }
-
+serde = "1.0.219"
+serde_derive = "1.0.219"
+serde_json = "1.0"
+tokio = { version = "1.45.1", features = ["rt-multi-thread"] }
+url = "2.5.4"
 
 [build-dependencies]
 serde_json = "1.0"

@@ -152,7 +152,6 @@ mod tests {
 
     /// Test comparing legacy vs new implementation for SimpleStorage SET transaction.
     #[tokio::test]
-    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
     async fn test_compare_simple_storage_set() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -184,7 +183,6 @@ mod tests {
 
     /// Test comparing legacy vs new implementation for SimpleStorage DEPOSIT transaction.
     #[tokio::test]
-    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
     async fn test_compare_simple_storage_deposit() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -220,7 +218,6 @@ mod tests {
     /// - 1 CALL operation
     /// - 2 DELEGATECALL operations (which should be skipped, not captured as state updates)
     #[tokio::test]
-    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
     async fn test_compare_delegatecall() -> Result<()> {
         use crate::sol_types::IStateUpdateTypes;
         use alloy::primitives::b256;
@@ -282,7 +279,6 @@ mod tests {
 
     /// Test comparing legacy vs new implementation for CALL external transaction.
     #[tokio::test]
-    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
     async fn test_compare_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -314,7 +310,6 @@ mod tests {
 
     /// Test comparing legacy vs new implementation for simulated call.
     #[tokio::test]
-    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
     async fn test_compare_simulate_call() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -350,7 +345,6 @@ mod tests {
 
     /// Test comparing legacy vs new implementation for AccessControl transaction.
     #[tokio::test]
-    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
     async fn test_compare_access_control() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -383,7 +377,6 @@ mod tests {
     /// Test comparing legacy vs new implementation for array iteration transaction.
     /// This is a more complex test case with multiple SSTORE operations.
     #[tokio::test]
-    #[ignore = "requires RPC_URL with pre-deployed test contracts"]
     async fn test_compare_array_iteration() -> Result<()> {
         dotenv::dotenv().ok();
 

@@ -1,22 +1,31 @@
 use alloy::primitives::{Address, FixedBytes, address, b256};
 
-pub const SIMPLE_STORAGE_ADDRESS: Address = address!("0x2273cb304cF542E0Db67C78AAb2bD120D24655b2");
-pub const SIMPLE_STORAGE_SET_TX_HASH: FixedBytes<32> =
-    b256!("0x4ee771ec4fa5f3fb22bc7dfb146cf8d8e3f439ea05baf24809e3f901e96de05f");
-pub const SIMPLE_STORAGE_DEPOSIT_TX_HASH: FixedBytes<32> =
-    b256!("0x524480959eea76b1503ff3f291fb8de79daeff0f512c99b959e5585cb14b8442");
-pub const SIMPLE_STORAGE_CALL_EXTERNAL_TX_HASH: FixedBytes<32> =
-    b256!("0xecb274407af5a71944008d751eba5b4dcd53e36ec338225e6ae366aff2f9da10");
+// Contracts on Gnosis mainnet used for testing
 pub const DELEGATECALL_CONTRACT_MAIN_ADDRESS: Address =
-    address!("0xB5C5a908b14670C954E78Ca5163ac7d3B7bE5D70");
+    address!("0x11A16BA2BbcBAaa23555eb5f6D4C938C14230b84");
 pub const DELEGATE_CONTRACT_A_ADDRESS: Address =
-    address!("0xde7600ee1bea19c2f5f23c4c474134a149d470d1");
-pub const DELEGATECALL_CONTRACT_MAIN_RUN_TX_HASH: FixedBytes<32> =
-    b256!("0xb5d369570ec8bbbc75dd9702a824ce2fd1c961655582fb62b0b1c96276bdb4f5");
+    address!("0x276ec521ed87eFF06F2d1067AB61a28e969b6F88");
 pub const ACCESS_CONTROL_MAIN_ADDRESS: Address =
-    address!("0x1445f471F91De8d5889b52b4D20b4B907f7f8499");
+    address!("0x8bB7AfE4BbDdeFf40859c963521DF3418345E8f7");
+
+// Transactions on Gnosis mainnet used for testing
+pub const DELEGATECALL_CONTRACT_MAIN_RUN_TX_HASH: FixedBytes<32> =
+    b256!("0x66db1b5c186504525e6be240747f4458a4038afaa0898ad30ae0f22c92750dea");
 pub const ACCESS_CONTROL_MAIN_RUN_TX_HASH: FixedBytes<32> =
-    b256!("0xa484bb888e8952793eb010e5ba43c4bf8cdc2aec702441df06a0b97446ada5d6");
+    b256!("0xd009b3d1095790eb78eb25bc25c7312b98356655a8ab2bf8a5230d2b20c7fd1b");
+
+// TODO: Update address to Gnosis mainnet address for other tests
+pub const SIMPLE_STORAGE_ADDRESS: Address = address!("0x2273cb304cF542E0Db67C78AAb2bD120D24655b2");
+
+// TODO: Update hashes to Gnosis mainnet transactions for other tests
+pub const SIMPLE_STORAGE_SET_TX_HASH: FixedBytes<32> =
+    b256!("0x66db1b5c186504525e6be240747f4458a4038afaa0898ad30ae0f22c92750dea");
+pub const SIMPLE_STORAGE_DEPOSIT_TX_HASH: FixedBytes<32> =
+    b256!("0x66db1b5c186504525e6be240747f4458a4038afaa0898ad30ae0f22c92750dea");
+pub const SIMPLE_STORAGE_CALL_EXTERNAL_TX_HASH: FixedBytes<32> =
+    b256!("0x66db1b5c186504525e6be240747f4458a4038afaa0898ad30ae0f22c92750dea");
 pub const SIMPLE_ARRAY_ITERATION_TX_HASH: FixedBytes<32> =
-    b256!("0x2b9df88d44d22702fafb832c07cd8dddd3fb8d4d5b9453d0328c5835f8adc7c1");
+    b256!("0x66db1b5c186504525e6be240747f4458a4038afaa0898ad30ae0f22c92750dea");
+
+// Used for testing
 pub const FAKE_ADDRESS: Address = address!("0xc76a6477c12dcb8554b1493482D85AB720b2A322");

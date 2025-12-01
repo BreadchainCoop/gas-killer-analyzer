@@ -618,7 +618,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_csv_writer() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -638,7 +637,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_estimate_state_changes_gas_set() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -660,7 +658,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_estimate_state_changes_gas_access_control() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -682,7 +679,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_estimate_state_changes_gas_access_control_failure() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -712,7 +708,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_set() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -756,7 +751,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_deposit() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -804,7 +798,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_delegatecall() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -870,7 +863,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
@@ -900,7 +892,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_update_simulate_call() -> Result<()> {
         dotenv::dotenv().ok();
 
