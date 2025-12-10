@@ -39,7 +39,3 @@ serde_json = "1.0"
 [[example]]
 name = "tx_extractor_example"
 path = "examples/tx_extractor_example.rs"
-
-[patch.crates-io]
-svm-rs-builds = { git = "https://github.com/alloy-rs/svm-rs", rev = "ee99800a8a1b803263fcc12fe3ed8c059e2302c4" }
-svm-rs = { git = "https://github.com/alloy-rs/svm-rs", rev = "ee99800a8a1b803263fcc12fe3ed8c059e2302c4" }
