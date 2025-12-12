@@ -56,7 +56,7 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
         let anvil_init = Anvil::new().fork(fork_url.as_str());
 
         let anvil = if let Some(number) = block_number {
-            anvil_init.fork_block_number(number - 1).try_spawn()?
+            anvil_init.fork_block_number(number).try_spawn()?
         } else {
             anvil_init.try_spawn()?
         };
