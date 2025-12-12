@@ -138,7 +138,7 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
             let request = serde_json::from_str::<TransactionRequest>(contents.as_ref())
                 .expect("unable to read json data");
             if let Ok((_, estimate, _)) =
-                call_to_encoded_state_updates_with_gas_estimate(rpc_url, request, gk).await
+                call_to_encoded_state_updates_with_gas_estimate(rpc_url, request, gk, None).await
             {
                 println!("gas killer estimate: {estimate}");
             } else {

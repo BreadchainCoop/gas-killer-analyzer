@@ -208,9 +208,7 @@ pub async fn get_trace_from_call(
             .arg("--steps-tracing")
             .arg("--auto-impersonate");
         if let Some(height) = block_height {
-            config
-                .arg("--fork-block-number")
-                .arg(height.to_string())
+            config.arg("--fork-block-number").arg(height.to_string())
         } else {
             config
         }
