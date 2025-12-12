@@ -200,12 +200,20 @@ pub async fn get_tx_trace<P: Provider>(
 pub async fn get_trace_from_call(
     rpc_url: Url,
     tx_request: TransactionRequest,
+    block_height: Option<u64>,
 ) -> Result<DefaultFrame> {
     let provider = ProviderBuilder::new().connect_anvil_with_wallet_and_config(|config| {
-        config
+        let config = config
             .fork(rpc_url)
             .arg("--steps-tracing")
-            .arg("--auto-impersonate")
+            .arg("--auto-impersonate");
+        if let Some(height) = block_height {
+            config
+                .arg("--fork-block-number")
+                .arg(height.to_string())
+        } else {
+            config
+        }
     })?;
     let tx_receipt = provider
         .send_transaction(tx_request)
@@ -492,6 +500,7 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
     url: Url,
     tx_request: TransactionRequest,
     gk: GasKillerDefault,
+    block_height: Option<u64>,
 ) -> Result<(Bytes, u64, HashSet<Opcode>)> {
     let contract_address = tx_request
         .to
@@ -500,7 +509,7 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
             TxKind::Create => None,
         })
         .ok_or_else(|| anyhow!("receipt does not have to address"))?;
-    let trace = get_trace_from_call(url, tx_request).await?;
+    let trace = get_trace_from_call(url, tx_request, block_height).await?;
     let (state_updates, skipped_opcodes) = compute_state_updates(trace).await?;
     let gas_estimate = gk
         .estimate_state_changes_gas(contract_address, &state_updates)
@@ -891,7 +900,7 @@ mod tests {
             SimpleStorage::SimpleStorageInstance::new(SIMPLE_STORAGE_ADDRESS, &provider);
         let tx_request = simple_storage.set(U256::from(1)).into_transaction_request();
 
-        let trace = get_trace_from_call(rpc_url, tx_request).await?;
+        let trace = get_trace_from_call(rpc_url, tx_request, None).await?;
         let (state_updates, _) = compute_state_updates(trace).await?;
 
         assert_eq!(state_updates.len(), 2);
