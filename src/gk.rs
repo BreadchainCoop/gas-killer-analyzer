@@ -5,15 +5,24 @@ use alloy::{
     hex,
     network::EthereumWallet,
     node_bindings::{Anvil, AnvilInstance},
-    primitives::{Address, Bytes, Selector, U256},
+    primitives::{Address, Bytes, FixedBytes, Selector, U256},
     providers::{
         Identity, ProviderBuilder, RootProvider,
+        ext::DebugApi,
         fillers::{
             BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller,
             WalletFiller,
         },
     },
-    rpc::json_rpc::ErrorPayload,
+    rpc::{
+        json_rpc::ErrorPayload,
+        types::{
+            eth::TransactionRequest,
+            trace::geth::{
+                DefaultFrame, GethDebugTracingOptions, GethDefaultTracingOptions, GethTrace,
+            },
+        },
+    },
     signers::local::PrivateKeySigner,
     sol,
     sol_types::SolError,
@@ -52,14 +61,25 @@ pub struct GasKiller<P> {
 }
 
 impl GasKiller<ConnectHTTPDefaultProvider> {
+    /// Creates a new GasKiller instance with a forked Anvil.
+    ///
+    /// The Anvil instance is configured with:
+    /// - `--steps-tracing`: Enable detailed step tracing for transactions
+    /// - `--auto-impersonate`: Auto-impersonate any sender address
+    ///
+    /// This single Anvil instance is used for BOTH tracing and gas estimation,
+    /// ensuring consistent state across operations.
     pub async fn new(fork_url: Url, block_number: Option<u64>) -> Result<Self> {
-        let anvil_init = Anvil::new().fork(fork_url.as_str());
+        let mut anvil_init = Anvil::new()
+            .fork(fork_url.as_str())
+            .arg("--steps-tracing")
+            .arg("--auto-impersonate");
 
-        let anvil = if let Some(number) = block_number {
-            anvil_init.fork_block_number(number).try_spawn()?
-        } else {
-            anvil_init.try_spawn()?
-        };
+        if let Some(number) = block_number {
+            anvil_init = anvil_init.fork_block_number(number);
+        }
+
+        let anvil = anvil_init.try_spawn()?;
         let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
         let provider = ProviderBuilder::new()
             .wallet(signer)
@@ -78,6 +98,49 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
             provider,
             code,
         })
+    }
+
+    /// Sends a transaction and returns the trace.
+    ///
+    /// Uses the same Anvil instance that will be used for gas estimation,
+    /// ensuring consistent blockchain state.
+    pub async fn send_tx_and_get_trace(
+        &self,
+        tx_request: TransactionRequest,
+    ) -> Result<DefaultFrame> {
+        let tx_receipt = self
+            .provider
+            .send_transaction(tx_request)
+            .await?
+            .get_receipt()
+            .await?;
+
+        if !tx_receipt.status() {
+            bail!("transaction failed");
+        }
+
+        let tx_hash = tx_receipt.transaction_hash;
+        self.get_tx_trace(tx_hash).await
+    }
+
+    /// Gets the trace for a transaction that was already executed.
+    pub async fn get_tx_trace(&self, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
+        let options = GethDebugTracingOptions {
+            config: GethDefaultTracingOptions {
+                enable_memory: Some(true),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let GethTrace::Default(trace) = self
+            .provider
+            .debug_trace_transaction(tx_hash, options)
+            .await?
+        else {
+            return Err(anyhow!("Expected default trace"));
+        };
+        Ok(trace)
     }
 
     pub async fn estimate_state_changes_gas(

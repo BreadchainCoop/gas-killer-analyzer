@@ -197,6 +197,15 @@ pub async fn get_tx_trace<P: Provider>(
     Ok(trace)
 }
 
+/// Gets a trace for a transaction call by spawning a temporary Anvil instance.
+///
+/// **DEPRECATED**: This function creates its own Anvil instance, which can lead to
+/// inconsistencies when used with `GasKillerDefault` (which has its own Anvil).
+/// Prefer using `GasKillerDefault::send_tx_and_get_trace()` or
+/// `call_to_encoded_state_updates_with_gas_estimate()` which use a single Anvil instance.
+///
+/// This function is kept for backward compatibility and standalone tracing operations
+/// where gas estimation is not needed.
 pub async fn get_trace_from_call(
     rpc_url: Url,
     tx_request: TransactionRequest,
@@ -494,11 +503,22 @@ pub async fn gaskiller_reporter(
     })
 }
 
+/// Computes state updates and gas estimate for a transaction using a SINGLE Anvil instance.
+///
+/// This function uses the provided `GasKiller` instance for BOTH:
+/// 1. Sending the transaction and getting the trace
+/// 2. Estimating the gas cost of the state updates
+///
+/// This ensures consistent blockchain state between tracing and gas estimation.
+/// The `GasKiller` must be created with the desired fork block height.
+///
+/// Note: The `_url` and `_block_height` parameters are deprecated and ignored.
+/// The `GasKiller` instance already contains the fork URL and block height.
 pub async fn call_to_encoded_state_updates_with_gas_estimate(
-    url: Url,
+    _url: Url,
     tx_request: TransactionRequest,
     gk: GasKillerDefault,
-    block_height: Option<u64>,
+    _block_height: Option<u64>,
 ) -> Result<(Bytes, u64, HashSet<Opcode>)> {
     let contract_address = tx_request
         .to
@@ -507,7 +527,10 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
             TxKind::Create => None,
         })
         .ok_or_else(|| anyhow!("receipt does not have to address"))?;
-    let trace = get_trace_from_call(url, tx_request, block_height).await?;
+
+    // Use the GasKiller's internal Anvil instance for tracing
+    // This ensures both tracing and gas estimation use the same blockchain state
+    let trace = gk.send_tx_and_get_trace(tx_request).await?;
     let (state_updates, skipped_opcodes) = compute_state_updates(trace).await?;
     let gas_estimate = gk
         .estimate_state_changes_gas(contract_address, &state_updates)
