@@ -58,6 +58,8 @@ pub struct GasKiller<P> {
     _anvil: AnvilInstance,
     provider: P,
     code: Bytes,
+    /// Deterministic timestamp to use for all transactions (fork block timestamp + 1)
+    deterministic_timestamp: u64,
 }
 
 impl GasKiller<ConnectHTTPDefaultProvider> {
@@ -69,7 +71,32 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
     ///
     /// This single Anvil instance is used for BOTH tracing and gas estimation,
     /// ensuring consistent state across operations.
+    ///
+    /// A deterministic timestamp is derived from the fork block to ensure
+    /// all nodes produce identical results regardless of when they execute.
     pub async fn new(fork_url: Url, block_number: Option<u64>) -> Result<Self> {
+        // First, query the fork block's timestamp from the source RPC
+        // This ensures deterministic timestamps across all nodes
+        let source_provider = ProviderBuilder::new().connect_http(fork_url.clone());
+
+        let fork_block_timestamp = if let Some(number) = block_number {
+            let block = source_provider
+                .get_block_by_number(number.into())
+                .await?
+                .ok_or_else(|| anyhow!("Fork block {} not found", number))?;
+            block.header.timestamp
+        } else {
+            let block = source_provider
+                .get_block_by_number(alloy::eips::BlockNumberOrTag::Latest)
+                .await?
+                .ok_or_else(|| anyhow!("Latest block not found"))?;
+            block.header.timestamp
+        };
+
+        // Use fork block timestamp + 1 for deterministic execution
+        // This simulates the next block being mined immediately after the fork block
+        let deterministic_timestamp = fork_block_timestamp + 1;
+
         let mut anvil_init = Anvil::new()
             .fork(fork_url.as_str())
             .arg("--steps-tracing")
@@ -97,6 +124,7 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
             _anvil: anvil,
             provider,
             code,
+            deterministic_timestamp,
         })
     }
 
@@ -104,10 +132,19 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
     ///
     /// Uses the same Anvil instance that will be used for gas estimation,
     /// ensuring consistent blockchain state.
+    ///
+    /// Before sending, sets a deterministic block timestamp to ensure
+    /// all nodes produce identical results regardless of execution time.
     pub async fn send_tx_and_get_trace(
         &self,
         tx_request: TransactionRequest,
     ) -> Result<DefaultFrame> {
+        // Set deterministic timestamp for the next block
+        // This ensures all nodes get the same block.timestamp value
+        self.provider
+            .anvil_set_next_block_timestamp(self.deterministic_timestamp)
+            .await?;
+
         let tx_receipt = self
             .provider
             .send_transaction(tx_request)
