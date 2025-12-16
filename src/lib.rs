@@ -11,7 +11,7 @@ use structs::{GasKillerReport, Opcode, ReportDetails};
 
 use alloy::{
     primitives::{Address, Bytes, FixedBytes, TxKind, U256},
-    providers::{Provider, ProviderBuilder, ext::DebugApi},
+    providers::{Provider, ext::DebugApi},
     rpc::types::{
         TransactionReceipt,
         eth::TransactionRequest,
@@ -26,7 +26,6 @@ use alloy_rpc_types::TransactionTrait;
 use anyhow::{Result, anyhow, bail};
 use gk::GasKillerDefault;
 use sol_types::{IStateUpdateTypes, StateUpdate, StateUpdateType};
-use url::Url;
 
 const TURETZKY_UPPER_GAS_LIMIT: u64 = 250000u64;
 
@@ -195,43 +194,6 @@ pub async fn get_tx_trace<P: Provider>(
         return Err(anyhow::anyhow!("Expected default trace"));
     };
     Ok(trace)
-}
-
-/// Gets a trace for a transaction call by spawning a temporary Anvil instance.
-///
-/// **DEPRECATED**: This function creates its own Anvil instance, which can lead to
-/// inconsistencies when used with `GasKillerDefault` (which has its own Anvil).
-/// Prefer using `GasKillerDefault::send_tx_and_get_trace()` or
-/// `call_to_encoded_state_updates_with_gas_estimate()` which use a single Anvil instance.
-///
-/// This function is kept for backward compatibility and standalone tracing operations
-/// where gas estimation is not needed.
-pub async fn get_trace_from_call(
-    rpc_url: Url,
-    tx_request: TransactionRequest,
-    block_height: Option<u64>,
-) -> Result<DefaultFrame> {
-    let provider = ProviderBuilder::new().connect_anvil_with_wallet_and_config(|config| {
-        let config = config
-            .fork(rpc_url)
-            .arg("--steps-tracing")
-            .arg("--auto-impersonate");
-        if let Some(height) = block_height {
-            config.arg("--fork-block-number").arg(height.to_string())
-        } else {
-            config
-        }
-    })?;
-    let tx_receipt = provider
-        .send_transaction(tx_request)
-        .await?
-        .get_receipt()
-        .await?;
-    if !tx_receipt.status() {
-        bail!("transaction failed");
-    }
-    let tx_hash = tx_receipt.transaction_hash;
-    get_tx_trace(&provider, tx_hash).await
 }
 
 fn encode_state_updates_to_sol(
@@ -510,15 +472,10 @@ pub async fn gaskiller_reporter(
 /// 2. Estimating the gas cost of the state updates
 ///
 /// This ensures consistent blockchain state between tracing and gas estimation.
-/// The `GasKiller` must be created with the desired fork block height.
-///
-/// Note: The `_url` and `_block_height` parameters are deprecated and ignored.
-/// The `GasKiller` instance already contains the fork URL and block height.
+/// The `GasKiller` must be created with the desired fork URL and block height.
 pub async fn call_to_encoded_state_updates_with_gas_estimate(
-    _url: Url,
     tx_request: TransactionRequest,
     gk: GasKillerDefault,
-    _block_height: Option<u64>,
 ) -> Result<(Bytes, u64, HashSet<Opcode>)> {
     let contract_address = tx_request
         .to
@@ -625,15 +582,14 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_csv_writer() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
-        let gk = GasKillerDefault::new(rpc_url, None).await?;
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url.clone());
+        let gk = GasKillerDefault::builder(rpc_url).build().await?;
         let report = gas_estimate_tx(provider, SIMPLE_ARRAY_ITERATION_TX_HASH, &gk).await?;
 
         let _ = File::create("test.csv")?;
@@ -645,20 +601,19 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_estimate_state_changes_gas_set() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url.clone());
 
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
         let (state_updates, _) = compute_state_updates(trace).await?;
 
-        let gk = GasKillerDefault::new(rpc_url, None).await?;
+        let gk = GasKillerDefault::builder(rpc_url).build().await?;
         let gas_estimate = gk
             .estimate_state_changes_gas(SIMPLE_STORAGE_ADDRESS, &state_updates)
             .await?;
@@ -667,20 +622,19 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_estimate_state_changes_gas_access_control() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url.clone());
 
         let tx_hash = ACCESS_CONTROL_MAIN_RUN_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
         let (state_updates, _) = compute_state_updates(trace).await?;
 
-        let gk = GasKillerDefault::new(rpc_url, None).await?;
+        let gk = GasKillerDefault::builder(rpc_url).build().await?;
         let gas_estimate = gk
             .estimate_state_changes_gas(ACCESS_CONTROL_MAIN_ADDRESS, &state_updates)
             .await?;
@@ -689,20 +643,19 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_estimate_state_changes_gas_access_control_failure() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url.clone());
 
         let tx_hash = ACCESS_CONTROL_MAIN_RUN_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
         let (state_updates, _) = compute_state_updates(trace).await?;
 
-        let gk = GasKillerDefault::new(rpc_url, None).await?;
+        let gk = GasKillerDefault::builder(rpc_url).build().await?;
         let gas_estimate = gk
             .estimate_state_changes_gas(FAKE_ADDRESS, &state_updates)
             .await;
@@ -719,14 +672,13 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_set() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
@@ -763,14 +715,13 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_deposit() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_DEPOSIT_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
@@ -811,14 +762,13 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_delegatecall() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = DELEGATECALL_CONTRACT_MAIN_RUN_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
@@ -877,14 +827,13 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_updates_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_CALL_EXTERNAL_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
@@ -907,21 +856,23 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires RPC_URL environment variable with working endpoint"]
     async fn test_compute_state_update_simulate_call() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
 
-        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+        // Use GasKillerDefault so tracing and gas estimation share the same Anvil instance
+        let gk = GasKillerDefault::builder(rpc_url.clone()).build().await?;
 
+        // Build a tx request against the forked provider used by GasKiller
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url.clone());
         let simple_storage =
             SimpleStorage::SimpleStorageInstance::new(SIMPLE_STORAGE_ADDRESS, &provider);
         let tx_request = simple_storage.set(U256::from(1)).into_transaction_request();
 
-        let trace = get_trace_from_call(rpc_url, tx_request, None).await?;
+        let trace = gk.send_tx_and_get_trace(tx_request).await?;
         let (state_updates, _) = compute_state_updates(trace).await?;
 
         assert_eq!(state_updates.len(), 2);
