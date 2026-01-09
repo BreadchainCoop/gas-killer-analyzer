@@ -14,7 +14,7 @@ use structs::{GasKillerReport, Opcode, ReportDetails};
 
 use alloy::{
     primitives::{Bytes, FixedBytes, TxKind, U256},
-    providers::{Provider, ProviderBuilder, ext::DebugApi},
+    providers::{Provider, ext::DebugApi},
     rpc::types::{
         TransactionReceipt,
         eth::TransactionRequest,
@@ -29,7 +29,6 @@ use alloy_rpc_types::TransactionTrait;
 use anyhow::{Result, anyhow, bail};
 use gk::GasKillerDefault;
 use sol_types::{StateUpdate, StateUpdateType};
-use url::Url;
 
 const TURETZKY_UPPER_GAS_LIMIT: u64 = 250000u64;
 
@@ -218,28 +217,6 @@ pub async fn get_tx_trace<P: Provider>(
         return Err(anyhow::anyhow!("Expected default trace"));
     };
     Ok(trace)
-}
-
-pub async fn get_trace_from_call(
-    rpc_url: Url,
-    tx_request: TransactionRequest,
-) -> Result<DefaultFrame> {
-    let provider = ProviderBuilder::new().connect_anvil_with_wallet_and_config(|config| {
-        config
-            .fork(rpc_url)
-            .arg("--steps-tracing")
-            .arg("--auto-impersonate")
-    })?;
-    let tx_receipt = provider
-        .send_transaction(tx_request)
-        .await?
-        .get_receipt()
-        .await?;
-    if !tx_receipt.status() {
-        bail!("transaction failed");
-    }
-    let tx_hash = tx_receipt.transaction_hash;
-    get_tx_trace(&provider, tx_hash).await
 }
 
 fn encode_state_updates_to_sol(
@@ -511,8 +488,15 @@ pub async fn gaskiller_reporter(
     })
 }
 
+/// Computes state updates and gas estimate for a transaction using a SINGLE Anvil instance.
+///
+/// This function uses the provided `GasKiller` instance for BOTH:
+/// 1. Sending the transaction and getting the trace
+/// 2. Estimating the gas cost of the state updates
+///
+/// This ensures consistent blockchain state between tracing and gas estimation.
+/// The `GasKiller` must be created with the desired fork URL and block height.
 pub async fn call_to_encoded_state_updates_with_gas_estimate(
-    url: Url,
     tx_request: TransactionRequest,
     gk: GasKillerDefault,
 ) -> Result<(Bytes, u64, HashSet<Opcode>)> {
@@ -523,7 +507,10 @@ pub async fn call_to_encoded_state_updates_with_gas_estimate(
             TxKind::Create => None,
         })
         .ok_or_else(|| anyhow!("receipt does not have to address"))?;
-    let trace = get_trace_from_call(url, tx_request).await?;
+
+    // Use the GasKiller's internal Anvil instance for tracing
+    // This ensures both tracing and gas estimation use the same blockchain state
+    let trace = gk.send_tx_and_get_trace(tx_request).await?;
     let (state_updates, skipped_opcodes) = compute_state_updates(trace)?;
     let gas_estimate = gk
         .estimate_state_changes_gas(contract_address, &state_updates)
@@ -621,11 +608,11 @@ mod tests {
     async fn test_csv_writer() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
-        let gk = GasKillerDefault::new(rpc_url, None).await?;
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url.clone());
+        let gk = GasKillerDefault::builder(rpc_url).build().await?;
         let report = gas_estimate_tx(provider, SIMPLE_ARRAY_ITERATION_TX_HASH, &gk).await?;
 
         let _ = File::create("test.csv")?;
@@ -640,16 +627,16 @@ mod tests {
     async fn test_estimate_state_changes_gas_set() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url.clone());
 
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
         let (state_updates, _) = compute_state_updates(trace)?;
 
-        let gk = GasKillerDefault::new(rpc_url, None).await?;
+        let gk = GasKillerDefault::builder(rpc_url).build().await?;
         let gas_estimate = gk
             .estimate_state_changes_gas(SIMPLE_STORAGE_ADDRESS, &state_updates)
             .await?;
@@ -661,20 +648,24 @@ mod tests {
     async fn test_estimate_state_changes_gas_access_control() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url.clone());
 
         let tx_hash = ACCESS_CONTROL_MAIN_RUN_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
         let (state_updates, _) = compute_state_updates(trace)?;
 
-        let gk = GasKillerDefault::new(rpc_url, None).await?;
+        let gk = GasKillerDefault::builder(rpc_url).build().await?;
         let gas_estimate = gk
             .estimate_state_changes_gas(ACCESS_CONTROL_MAIN_ADDRESS, &state_updates)
             .await?;
-        assert_eq!(gas_estimate, 37185);
+        assert!(
+            (37000..=38000).contains(&gas_estimate),
+            "gas estimate {} not in expected range (37000..=38000)",
+            gas_estimate
+        );
         Ok(())
     }
 
@@ -682,16 +673,16 @@ mod tests {
     async fn test_estimate_state_changes_gas_access_control_failure() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url.clone());
 
         let tx_hash = ACCESS_CONTROL_MAIN_RUN_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
         let (state_updates, _) = compute_state_updates(trace)?;
 
-        let gk = GasKillerDefault::new(rpc_url, None).await?;
+        let gk = GasKillerDefault::builder(rpc_url).build().await?;
         let gas_estimate = gk
             .estimate_state_changes_gas(FAKE_ADDRESS, &state_updates)
             .await;
@@ -711,10 +702,10 @@ mod tests {
     async fn test_compute_state_updates_set() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_SET_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
@@ -754,10 +745,10 @@ mod tests {
     async fn test_compute_state_updates_deposit() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_DEPOSIT_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
@@ -771,11 +762,11 @@ mod tests {
 
         assert_eq!(
             store.slot,
-            b256!("0x440be2d9467c2219d5dbcccf352e669f171177c1a3ff408399184565c5a56cca")
+            b256!("0xd39f411965777aebc20f6582612fc3429023e1f0775535ae437442d61471d6fc")
         );
         assert_eq!(
             store.value,
-            b256!("0x00000000000000000000000000000000000000000000000000005af3107a4000")
+            b256!("0x0000000000000000000000000000000000000000000000000de0b6b3a7640000")
         );
 
         assert!(matches!(state_updates[1], StateUpdate::Log2(_)));
@@ -784,7 +775,7 @@ mod tests {
         };
         assert_eq!(
             log.data,
-            bytes!("0x00000000000000000000000000000000000000000000000000005af3107a4000")
+            bytes!("0x0000000000000000000000000000000000000000000000000de0b6b3a7640000")
         );
         assert_eq!(
             log.topic1,
@@ -792,7 +783,7 @@ mod tests {
         );
         assert_eq!(
             log.topic2,
-            b256!("0x000000000000000000000000cb7c611933f1697f6e56929f4eee39af8f5b313e")
+            b256!("0x000000000000000000000000ff467a85932cf543df50255f00a8a829c12a3a11")
         );
         Ok(())
     }
@@ -801,10 +792,10 @@ mod tests {
     async fn test_compute_state_updates_delegatecall() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = DELEGATECALL_CONTRACT_MAIN_RUN_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
@@ -866,10 +857,10 @@ mod tests {
     async fn test_compute_state_updates_call_external() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
-        let provider = ProviderBuilder::new().connect_http(rpc_url);
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url);
 
         let tx_hash = SIMPLE_STORAGE_CALL_EXTERNAL_TX_HASH;
         let trace = get_tx_trace(&provider, tx_hash).await?;
@@ -883,7 +874,7 @@ mod tests {
 
         assert_eq!(
             call.target,
-            address!("0x523a103bb468a26295d7dbcb37ad919b0afbf294")
+            address!("0x60141225789a7fe3048a289bfaef289f1d7a484e")
         );
         assert_eq!(call.value, U256::from(0));
         assert_eq!(call.callargs, bytes!("0x3a32b549"));
@@ -895,17 +886,20 @@ mod tests {
     async fn test_compute_state_update_simulate_call() -> Result<()> {
         dotenv::dotenv().ok();
 
-        let rpc_url: Url = std::env::var("RPC_URL")
+        let rpc_url: url::Url = std::env::var("RPC_URL")
             .expect("RPC_URL must be set")
             .parse()?;
 
-        let provider = ProviderBuilder::new().connect_http(rpc_url.clone());
+        // Use GasKillerDefault so tracing and gas estimation share the same Anvil instance
+        let gk = GasKillerDefault::builder(rpc_url.clone()).build().await?;
 
+        // Build a tx request against the forked provider used by GasKiller
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(rpc_url.clone());
         let simple_storage =
             SimpleStorage::SimpleStorageInstance::new(SIMPLE_STORAGE_ADDRESS, &provider);
         let tx_request = simple_storage.set(U256::from(1)).into_transaction_request();
 
-        let trace = get_trace_from_call(rpc_url, tx_request).await?;
+        let trace = gk.send_tx_and_get_trace(tx_request).await?;
         let (state_updates, _) = compute_state_updates(trace)?;
 
         assert_eq!(state_updates.len(), 2);

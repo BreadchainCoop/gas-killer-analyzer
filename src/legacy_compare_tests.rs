@@ -142,10 +142,9 @@ fn compare_state_updates(legacy: &[StateUpdate], new: &[StateUpdate]) -> Result<
 mod tests {
     use super::*;
     use crate::constants::*;
+    use crate::gk::GasKillerDefault;
     use crate::sol_types::SimpleStorage;
-    use crate::{
-        compute_state_updates, compute_state_updates_legacy, get_trace_from_call, get_tx_trace,
-    };
+    use crate::{compute_state_updates, compute_state_updates_legacy, get_tx_trace};
     use alloy::primitives::U256;
     use alloy::providers::ProviderBuilder;
     use url::Url;
@@ -323,7 +322,9 @@ mod tests {
             SimpleStorage::SimpleStorageInstance::new(SIMPLE_STORAGE_ADDRESS, &provider);
         let tx_request = simple_storage.set(U256::from(1)).into_transaction_request();
 
-        let trace = get_trace_from_call(rpc_url, tx_request).await?;
+        // Use GasKiller to send the transaction and get the trace
+        let gk = GasKillerDefault::builder(rpc_url).build().await?;
+        let trace = gk.send_tx_and_get_trace(tx_request).await?;
 
         // Run legacy implementation
         let (legacy_updates, legacy_skipped) = compute_state_updates_legacy(trace.clone())?;

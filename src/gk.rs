@@ -5,15 +5,24 @@ use alloy::{
     hex,
     network::EthereumWallet,
     node_bindings::{Anvil, AnvilInstance},
-    primitives::{Address, Bytes, Selector, U256},
+    primitives::{Address, Bytes, FixedBytes, Selector, U256},
     providers::{
         Identity, ProviderBuilder, RootProvider,
+        ext::DebugApi,
         fillers::{
             BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller,
             WalletFiller,
         },
     },
-    rpc::json_rpc::ErrorPayload,
+    rpc::{
+        json_rpc::ErrorPayload,
+        types::{
+            eth::TransactionRequest,
+            trace::geth::{
+                DefaultFrame, GethDebugTracingOptions, GethDefaultTracingOptions, GethTrace,
+            },
+        },
+    },
     signers::local::PrivateKeySigner,
     sol,
     sol_types::SolError,
@@ -45,21 +54,86 @@ type ConnectHTTPDefaultProvider = FillProvider<
 >;
 pub type GasKillerDefault = GasKiller<ConnectHTTPDefaultProvider>;
 
-pub struct GasKiller<P> {
-    _anvil: AnvilInstance,
-    provider: P,
-    code: Bytes,
+/// Builder for configuring and creating a `GasKiller` instance.
+pub struct GasKillerBuilder {
+    fork_url: Url,
+    block_number: Option<u64>,
+    timestamp: Option<u64>,
 }
 
-impl GasKiller<ConnectHTTPDefaultProvider> {
-    pub async fn new(fork_url: Url, block_number: Option<u64>) -> Result<Self> {
-        let anvil_init = Anvil::new().fork(fork_url.as_str());
+impl GasKillerBuilder {
+    /// Create a new builder with the required fork URL.
+    pub fn new(fork_url: Url) -> Self {
+        Self {
+            fork_url,
+            block_number: None,
+            timestamp: None,
+        }
+    }
 
-        let anvil = if let Some(number) = block_number {
-            anvil_init.fork_block_number(number - 1).try_spawn()?
+    /// Set the block number to fork from. If not set, forks from the latest block.
+    pub fn block_number(mut self, block_number: u64) -> Self {
+        self.block_number = Some(block_number);
+        self
+    }
+
+    /// Set the timestamp for the next block. If not set, defaults to `fork_block_timestamp + 1`.
+    /// The timestamp must be >= the fork block timestamp to satisfy Ethereum's strictly
+    /// increasing timestamp requirement.
+    pub fn timestamp(mut self, timestamp: u64) -> Self {
+        self.timestamp = Some(timestamp);
+        self
+    }
+
+    /// Build the `GasKiller` instance.
+    pub async fn build(self) -> Result<GasKillerDefault> {
+        // First, query the fork block's timestamp from the source RPC
+        // This ensures deterministic timestamps across all nodes
+        let source_provider = ProviderBuilder::new().connect_http(self.fork_url.clone());
+
+        let fork_block_timestamp = if let Some(number) = self.block_number {
+            let block = source_provider
+                .get_block_by_number(number.into())
+                .await?
+                .ok_or_else(|| anyhow!("Fork block {} not found", number))?;
+            block.header.timestamp
         } else {
-            anvil_init.try_spawn()?
+            let block = source_provider
+                .get_block_by_number(alloy::eips::BlockNumberOrTag::Latest)
+                .await?
+                .ok_or_else(|| anyhow!("Latest block not found"))?;
+            block.header.timestamp
         };
+
+        // Determine the timestamp to use for the next block
+        let deterministic_timestamp = if let Some(provided_timestamp) = self.timestamp {
+            // Validate that the provided timestamp satisfies Ethereum's requirements
+            // Ethereum requires block timestamps to be strictly increasing
+            if provided_timestamp < fork_block_timestamp {
+                bail!(
+                    "Provided timestamp {} is less than fork block timestamp {}. \
+                     Ethereum requires block timestamps to be strictly increasing.",
+                    provided_timestamp,
+                    fork_block_timestamp
+                );
+            }
+            provided_timestamp
+        } else {
+            // Default to fork block timestamp + 1 for deterministic execution
+            // This simulates the next block being mined immediately after the fork block
+            fork_block_timestamp + 1
+        };
+
+        let mut anvil_init = Anvil::new()
+            .fork(self.fork_url.as_str())
+            .arg("--steps-tracing")
+            .arg("--auto-impersonate");
+
+        if let Some(number) = self.block_number {
+            anvil_init = anvil_init.fork_block_number(number);
+        }
+
+        let anvil = anvil_init.try_spawn()?;
         let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
         let provider = ProviderBuilder::new()
             .wallet(signer)
@@ -73,11 +147,92 @@ impl GasKiller<ConnectHTTPDefaultProvider> {
 
         let code = provider.get_code_at(address).await?;
 
-        Ok(Self {
+        Ok(GasKiller {
             _anvil: anvil,
             provider,
             code,
+            deterministic_timestamp,
         })
+    }
+}
+
+pub struct GasKiller<P> {
+    _anvil: AnvilInstance,
+    provider: P,
+    code: Bytes,
+    /// Deterministic timestamp to use for all transactions (fork block timestamp + 1)
+    deterministic_timestamp: u64,
+}
+
+impl GasKiller<ConnectHTTPDefaultProvider> {
+    /// Creates a new `GasKillerBuilder` for configuring a `GasKiller` instance.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use gas_analyzer_rs::gk::GasKillerDefault;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let gk = GasKillerDefault::builder(url::Url::parse("http://localhost:8545")?)
+    ///     .block_number(12345)
+    ///     .timestamp(1234567890)
+    ///     .build()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn builder(fork_url: Url) -> GasKillerBuilder {
+        GasKillerBuilder::new(fork_url)
+    }
+
+    /// Sends a transaction and returns the trace.
+    ///
+    /// Uses the same Anvil instance that will be used for gas estimation,
+    /// ensuring consistent blockchain state.
+    ///
+    /// Before sending, sets a deterministic block timestamp to ensure
+    /// all nodes produce identical results regardless of execution time.
+    pub async fn send_tx_and_get_trace(
+        &self,
+        tx_request: TransactionRequest,
+    ) -> Result<DefaultFrame> {
+        // Set deterministic timestamp for the next block
+        // This ensures all nodes get the same block.timestamp value
+        self.provider
+            .anvil_set_next_block_timestamp(self.deterministic_timestamp)
+            .await?;
+
+        let tx_receipt = self
+            .provider
+            .send_transaction(tx_request)
+            .await?
+            .get_receipt()
+            .await?;
+
+        if !tx_receipt.status() {
+            bail!("transaction failed");
+        }
+
+        let tx_hash = tx_receipt.transaction_hash;
+        self.get_tx_trace(tx_hash).await
+    }
+
+    /// Gets the trace for a transaction that was already executed.
+    pub async fn get_tx_trace(&self, tx_hash: FixedBytes<32>) -> Result<DefaultFrame> {
+        let options = GethDebugTracingOptions {
+            config: GethDefaultTracingOptions {
+                enable_memory: Some(true),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let GethTrace::Default(trace) = self
+            .provider
+            .debug_trace_transaction(tx_hash, options)
+            .await?
+        else {
+            return Err(anyhow!("Expected default trace"));
+        };
+        Ok(trace)
     }
 
     pub async fn estimate_state_changes_gas(

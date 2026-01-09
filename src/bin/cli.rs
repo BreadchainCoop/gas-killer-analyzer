@@ -72,7 +72,9 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
             let block_number = all_receipts[0]
                 .block_number
                 .expect("couldn't retrieve block number");
-            let gk = GasKillerDefault::new(rpc_url.clone(), Some(block_number))
+            let gk = GasKillerDefault::builder(rpc_url.clone())
+                .block_number(block_number)
+                .build()
                 .await
                 .expect("unable to initialize GasKiller");
 
@@ -107,7 +109,9 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
             let block_number = receipt
                 .block_number
                 .expect("couldn't retrieve block number");
-            let gk = GasKillerDefault::new(rpc_url.clone(), Some(block_number))
+            let gk = GasKillerDefault::builder(rpc_url.clone())
+                .block_number(block_number)
+                .build()
                 .await
                 .expect("unable to initialize GasKiller");
 
@@ -128,7 +132,8 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
         }
 
         Some(Commands::Request(file)) => {
-            let gk = GasKillerDefault::new(rpc_url.clone(), None)
+            let gk = GasKillerDefault::builder(rpc_url.clone())
+                .build()
                 .await
                 .expect("unable to initialize GasKiller");
             let mut file = File::open(file).expect("couldn't find file");
@@ -138,7 +143,7 @@ async fn execute_command(cmd: Option<Commands>) -> Result<()> {
             let request = serde_json::from_str::<TransactionRequest>(contents.as_ref())
                 .expect("unable to read json data");
             if let Ok((_, estimate, _)) =
-                call_to_encoded_state_updates_with_gas_estimate(rpc_url, request, gk).await
+                call_to_encoded_state_updates_with_gas_estimate(request, gk).await
             {
                 println!("gas killer estimate: {estimate}");
             } else {
