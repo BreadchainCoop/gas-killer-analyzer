@@ -662,8 +662,8 @@ mod tests {
             .estimate_state_changes_gas(ACCESS_CONTROL_MAIN_ADDRESS, &state_updates)
             .await?;
         assert!(
-            (35000..=60000).contains(&gas_estimate),
-            "gas estimate {} not in expected range (35000..=60000)",
+            (37000..=38000).contains(&gas_estimate),
+            "gas estimate {} not in expected range (37000..=38000)",
             gas_estimate
         );
         Ok(())
@@ -762,7 +762,7 @@ mod tests {
 
         assert_eq!(
             store.slot,
-            b256!("0xa787da2025d8e9943cb175559aa91ab38cff62dde3fd09b6da117a38c4ccd431")
+            b256!("0xd39f411965777aebc20f6582612fc3429023e1f0775535ae437442d61471d6fc")
         );
         assert_eq!(
             store.value,

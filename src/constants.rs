@@ -16,7 +16,7 @@ pub const DELEGATECALL_CONTRACT_MAIN_RUN_TX_HASH: FixedBytes<32> =
 pub const ACCESS_CONTROL_MAIN_ADDRESS: Address =
     address!("0x70eE40CF5A32e791cE2B0af6e535a3dbed11A206");
 pub const ACCESS_CONTROL_MAIN_RUN_TX_HASH: FixedBytes<32> =
-    b256!("0xbcde77ccf9043faaa9b96ac768ec63fd499baf4c125689f8835fbef604e880f5");
+    b256!("0x3fe223c8aabc4e5e6b918d65dd76d7f7bd8e93f6012a0e183ff0a299260b2f60");
 pub const SIMPLE_ARRAY_ITERATION_TX_HASH: FixedBytes<32> =
-    b256!("0x012d0fa2abbc103d524a8795200c81c59debbae2ccffa1700e49efb31b442bbb");
+    b256!("0xcbc329edbbce7d52b47197988bae076678f5ad9f02d591a7b24737b464778a1d");
 pub const FAKE_ADDRESS: Address = address!("0xc76a6477c12dcb8554b1493482D85AB720b2A322");
