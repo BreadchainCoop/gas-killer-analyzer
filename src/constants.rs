@@ -1,4 +1,4 @@
-use alloy::primitives::{Address, FixedBytes, address, b256};
+use alloy::primitives::{address, b256, Address, FixedBytes};
 
 pub const SIMPLE_STORAGE_ADDRESS: Address = address!("0xd682Fe2ee8bdd59fdcCc5a4962FD98c20Ef47290");
 pub const SIMPLE_STORAGE_SET_TX_HASH: FixedBytes<32> =
@@ -18,5 +18,5 @@ pub const ACCESS_CONTROL_MAIN_ADDRESS: Address =
 pub const ACCESS_CONTROL_MAIN_RUN_TX_HASH: FixedBytes<32> =
     b256!("0xbcde77ccf9043faaa9b96ac768ec63fd499baf4c125689f8835fbef604e880f5");
 pub const SIMPLE_ARRAY_ITERATION_TX_HASH: FixedBytes<32> =
-    b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
+    b256!("0x012d0fa2abbc103d524a8795200c81c59debbae2ccffa1700e49efb31b442bbb");
 pub const FAKE_ADDRESS: Address = address!("0xc76a6477c12dcb8554b1493482D85AB720b2A322");
