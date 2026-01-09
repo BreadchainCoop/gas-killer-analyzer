@@ -661,7 +661,11 @@ mod tests {
         let gas_estimate = gk
             .estimate_state_changes_gas(ACCESS_CONTROL_MAIN_ADDRESS, &state_updates)
             .await?;
-        assert!((35000..=60000).contains(&gas_estimate), "gas estimate {} not in expected range (35000..=60000)", gas_estimate);
+        assert!(
+            (35000..=60000).contains(&gas_estimate),
+            "gas estimate {} not in expected range (35000..=60000)",
+            gas_estimate
+        );
         Ok(())
     }
 
