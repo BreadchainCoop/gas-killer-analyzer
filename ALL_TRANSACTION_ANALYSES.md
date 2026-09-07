@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-342 Ethereum mainnet transactions across 32 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
+347 Ethereum mainnet transactions across 34 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -157,6 +157,8 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **ZeroDev** | 9 | 0 | **0.00%** | — | replay costs more (9) |
 | **EAS** | 11 | 0 | **0.00%** | — | replay costs more (11) |
 | **Gitcoin** | 5 | 0 | **0.00%** | — | replay costs more (5); GTC token only — Passport is not on mainnet |
+| **Snapshot** | 2 | 0 | **0.00%** | — | replay costs more (2); delegation record only, voting is off-chain |
+| **delegate.xyz** | 3 | 0 | **0.00%** | — | replay costs more (3); found while separating it from Snapshot |
 | **Frax** | 10 | 0 | **0.00%** | — | replay costs more (10); router rows are **call-blocked**, not empty — see `CALL_BLOCKED_CANDIDATES.md` |
 
 ## ENS: 18 transactions, 18 measured, nothing saved
@@ -1115,6 +1117,11 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Sky | [`0x1c77d8ed…`](https://etherscan.io/tx/0x1c77d8edef60f73522dfe4b551680d7f3ed0d12e53b146fae31a3af0f5539fe6) | sUSDS `transfer` ✓ `0xa9059cbb` | 56,380 | 62,836 | -6,456 | **0** (0.00%) | 0 | replay costs more | 3 (1L3/2S) |  |
 | Sky | [`0x765e023f…`](https://etherscan.io/tx/0x765e023f53a0822981195b2c5711f9a1c973c951a3488856ecdfb01ac6b48f7c) | USDS `transfer` ✓ `0xa9059cbb` | 56,336 | 62,836 | -6,500 | **0** (0.00%) | 0 | replay costs more | 3 (1L3/2S) |  |
 | Sky | [`0xd1ddae6d…`](https://etherscan.io/tx/0xd1ddae6dade88620d7be1aea762b7881998f1040dea2900a71e7126b6ea23a6e) | DaiUsds `daiToUsds` ✓ `0xf2c07aae` | 132,007 | 151,437 | -19,430 | **0** (0.00%) | 0 | replay costs more | 4 (3C/1L3) |  |
+| delegate.xyz | [`0x65286291…`](https://etherscan.io/tx/0x65286291c107b37220aa654fb9083509bb2220a83978bf8dd25795eed4e4f12a) | `delegateERC721` ✓ `0xb18e2bbb` | 203,515 | 232,663 | -29,148 | **0** (0.00%) | 0 | replay costs more | 9 (8S/1L4) |  |
+| delegate.xyz | [`0xec6a26db…`](https://etherscan.io/tx/0xec6a26db73946d9cb69adc06deac17fc4fd98ba7a2e33c6ac052b6d547b8a0b2) | `delegateERC721` ✓ `0xb18e2bbb` | 186,415 | 215,587 | -29,172 | **0** (0.00%) | 0 | replay costs more | 9 (8S/1L4) |  |
+| delegate.xyz | [`0xb83be259…`](https://etherscan.io/tx/0xb83be25931d74b873a78105d727b60e1c9f804378661f53a47e89396492064eb) | `delegateERC721` ✓ `0xb18e2bbb` | 186,127 | 215,023 | -28,896 | **0** (0.00%) | 0 | replay costs more | 9 (8S/1L4) |  |
+| Snapshot | [`0x7cbed6fc…`](https://etherscan.io/tx/0x7cbed6fc639c0190a49c40a08a783f72ea139c31e5c05310f03477be632487aa) | DelegateRegistry `setDelegate` ✓ `0xbd86e508` | 46,927 | 55,776 | -8,849 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L4) |  |
+| Snapshot | [`0xedb0f7be…`](https://etherscan.io/tx/0xedb0f7be3d0539a6442f0c86cf08aba995fa8b6f4bda8a181dd8aab1b22d018f) | DelegateRegistry `setDelegate` ✓ `0xbd86e508` | 46,747 | 55,596 | -8,849 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L4) |  |
 | Gitcoin | [`0xa5c2fea2…`](https://etherscan.io/tx/0xa5c2fea27689a1aa1fe0cda700eab32ee0f53175ad99c2afe2cc0f4caa13b423) | GTC `transfer` ✓ `0xa9059cbb` | 100,501 | 118,905 | -18,404 | **0** (0.00%) | 0 | replay costs more | 9 (6S/2L2/1L3) |  |
 | Gitcoin | [`0xac81a1b9…`](https://etherscan.io/tx/0xac81a1b9c1cfc97be6cdeb5a09419262f21fb81e2b5ac595b21859dd91c48746) | GTC `transfer` ✓ `0xa9059cbb` | 100,465 | 118,749 | -18,284 | **0** (0.00%) | 0 | replay costs more | 9 (6S/2L2/1L3) |  |
 | Gitcoin | [`0xeb3b43d1…`](https://etherscan.io/tx/0xeb3b43d10aa80364be3551a1e14a04e9d7a52e0b055c480efcc54ded56347d28) | GTC `delegate` ✓ `0x5c19a95c` | 95,579 | 111,457 | -15,878 | **0** (0.00%) | 0 | replay costs more | 5 (3S/1L4/1L2) |  |

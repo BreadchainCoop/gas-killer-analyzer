@@ -1475,6 +1475,38 @@ This is the same shape as Sky and the Frax token rows: a token contract's transa
 state change. It is recorded for completeness, not because a token was ever a plausible
 candidate.
 
+## Snapshot — the vote is off-chain, so only the delegation record is here
+
+Snapshot's voting is off-chain by design. Its entire mainnet surface is one contract, the
+DelegateRegistry (`0x469788fE…`), with exactly two functions in 28 days: `setDelegate` (125
+calls, ~46,900 gas) and `clearDelegate` (24 calls, ~24,300). That is **5.32 direct
+transactions/day**.
+
+Two measured, both 0.00%. `setDelegate` records **1 `Store` and 1 `Log4`** — one slot and one
+event — for 46,927 gas used against a 55,776 replay cost. There is no computation on this chain
+to remove because the computation (tallying votes) never happens on this chain. One transaction
+stayed on the heuristic estimator and is excluded.
+
+**An attribution split worth recording.** The first scan of "Snapshot delegate registries"
+returned 745 transactions and 655 direct calls — 26.61/day, which would have made Snapshot one
+of the busier protocols in this survey. It is wrong. Only 149 of those belong to Snapshot. The
+other 506 belong to **delegate.xyz** (`0x0000…Bed493`), a different protocol that shares the
+"delegate registry" description but not the codebase: its selectors are `delegateAll`,
+`delegateERC721` and `delegateContract`, verified locally. Counting them as Snapshot would have
+inflated its volume 4.4× and attributed 186,000-gas transactions to a protocol whose own
+transactions are 24,000–47,000.
+
+## delegate.xyz — measured in passing, and it fails the same way
+
+Since the scan surfaced it, delegate.xyz was measured rather than discarded. It is a real
+mainnet protocol at **18 direct transactions/day** — more than Snapshot, EAS and Aragon
+combined — and considerably larger per transaction (124,000–204,000 gas).
+
+Three measured, all 0.00%. Every one records **8 `Store`s and 1 `Log4`** and replays about
+29,000 gas above cost. A delegation registry writes a delegation; that is the whole
+transaction. It is the same structural negative as EAS, at a larger size. Two transactions
+stayed on the heuristic estimator and are excluded.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is
