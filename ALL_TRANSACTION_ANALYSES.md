@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-347 Ethereum mainnet transactions across 34 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
+359 Ethereum mainnet transactions across 35 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -134,6 +134,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Symbiotic** | 4 | 4 | **57.04%** | 54.65% | — |
 | **Pyth** | 13 | 13 | **52.06%** | 16.22% | — |
 | **Mellow** | 5 | 5 | **41.55%** | 30.00% | — |
+| **Midas** | 12 | 9 | **23.54%** | 10.21% | under the floor (2), replay costs more (1); `depositInstant` wins are **not** call-blocked |
 | **Chronicle** | 24 | 17 | **32.64%** | 30.17% | under the floor (4), replay costs more (3) |
 | **Privacy Pools** | 11 | 2 | **19.47%** | 18.00% | replay costs more (9) |
 | **Aragon** | 19 | 6 | **24.15%** | 4.64% | replay costs more (11), under the floor (2); all wins **call-dominated**, and only `execute` ever saves — 6 of 6 |
@@ -1120,6 +1121,18 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | delegate.xyz | [`0x65286291…`](https://etherscan.io/tx/0x65286291c107b37220aa654fb9083509bb2220a83978bf8dd25795eed4e4f12a) | `delegateERC721` ✓ `0xb18e2bbb` | 203,515 | 232,663 | -29,148 | **0** (0.00%) | 0 | replay costs more | 9 (8S/1L4) |  |
 | delegate.xyz | [`0xec6a26db…`](https://etherscan.io/tx/0xec6a26db73946d9cb69adc06deac17fc4fd98ba7a2e33c6ac052b6d547b8a0b2) | `delegateERC721` ✓ `0xb18e2bbb` | 186,415 | 215,587 | -29,172 | **0** (0.00%) | 0 | replay costs more | 9 (8S/1L4) |  |
 | delegate.xyz | [`0xb83be259…`](https://etherscan.io/tx/0xb83be25931d74b873a78105d727b60e1c9f804378661f53a47e89396492064eb) | `delegateERC721` ✓ `0xb18e2bbb` | 186,127 | 215,023 | -28,896 | **0** (0.00%) | 0 | replay costs more | 9 (8S/1L4) |  |
+| Midas | [`0xaada5d1a…`](https://etherscan.io/tx/0xaada5d1ae5bb22de8e355b516af999e9d3561b7456d521ee34ce63d953c78c76) | `redeemInstant` ✓ `0x8b53f75e` | 687,607 | 577,695 | +109,912 | **59,912** (8.71%) | 0 | — | 9 (6C/2S/1L3) | **call-dominated** — 18 of 19 receipt logs produced inside the replayed `CALL`s |
+| Midas | [`0x4749ed20…`](https://etherscan.io/tx/0x4749ed20ece3a8f05389932fe7469103c21c7dda5501fc537ab1654e0d6fc81f) | `redeemInstant` ✓ `0x8b53f75e` | 687,605 | 577,690 | +109,915 | **59,915** (8.71%) | 0 | — | 9 (6C/2S/1L3) | **call-dominated** — 18 of 19 receipt logs produced inside the replayed `CALL`s |
+| Midas | [`0xa8a9dc84…`](https://etherscan.io/tx/0xa8a9dc84c9c612e20355603b505a8de8e133ff15bc3bc8572f113a98e852b5a1) | `redeemInstant` ✓ `0x8b53f75e` | 680,083 | 570,027 | +110,056 | **60,056** (8.83%) | 0 | — | 9 (6C/2S/1L3) | **call-dominated** — 18 of 19 receipt logs produced inside the replayed `CALL`s |
+| Midas | [`0xd1fc0758…`](https://etherscan.io/tx/0xd1fc0758c59333d16f0b86a2e18452da0cae8d9bdac94028dd9fbb891b493b14) | `redeemInstant` ✓ `0x8b53f75e` | 675,459 | 565,323 | +110,136 | **60,136** (8.90%) | 0 | — | 9 (6C/2S/1L3) | **call-dominated** — 18 of 19 receipt logs produced inside the replayed `CALL`s |
+| Midas | [`0x314d14d3…`](https://etherscan.io/tx/0x314d14d32e8b7749b4ae410c00b3a48bd585b37c272e9baa4db34d2c430452ce) | `redeemInstant` ✓ `0x8b53f75e` | 675,283 | 565,275 | +110,008 | **60,008** (8.89%) | 0 | — | 9 (6C/2S/1L3) | **call-dominated** — 18 of 19 receipt logs produced inside the replayed `CALL`s |
+| Midas | [`0xb4b5ebf8…`](https://etherscan.io/tx/0xb4b5ebf82257ed485cb1d5ef1c9a2d414d48b43121ee976ce97fd39206bc4f5e) | `redeemRequest` ✓ `0xbfc2d46a` | 343,673 | 239,894 | +103,779 | **53,779** (15.65%) | 0 | — | 9 (7S/1C/1L4) |  |
+| Midas | [`0x874fa4e0…`](https://etherscan.io/tx/0x874fa4e00aa6788e99b19e5d8ed53615a570ef4f1e8061ebfa311fde6dfb8315) | `depositInstant` ✓ `0xc02dd27a` | 340,326 | 210,210 | +130,116 | **80,116** (23.54%) | 0 | — | 6 (3S/2C/1L3) |  |
+| Midas | [`0xc21732ae…`](https://etherscan.io/tx/0xc21732ae2c101c8fb1529d88f8e0ebca2d20fd84bdc66f6cf6e8c61d7cfad37d) | `depositInstant` ✓ `0xc02dd27a` | 340,201 | 210,126 | +130,075 | **80,075** (23.54%) | 0 | — | 6 (3S/2C/1L3) |  |
+| Midas | [`0xc4ec177d…`](https://etherscan.io/tx/0xc4ec177d4ef03734406c6c3b14bd1ec00f79d961b2be44d90b9eccdaa997a702) | `redeemRequest` ✓ `0xbfc2d46a` | 338,910 | 235,377 | +103,533 | **53,533** (15.80%) | 0 | — | 9 (7S/1C/1L4) |  |
+| Midas | [`0x4596692b…`](https://etherscan.io/tx/0x4596692b4874036338f537fef4a86ad8eaf98011c0792d24c3ddfa224a2e93dc) | *unidentified* `0xa0c74afc` | 295,179 | 292,927 | +2,252 | **0** (0.00%) | 0 | under the floor | 30 (21S/6C/3L2) | **call-dominated** — 6 of 9 receipt logs produced inside the replayed `CALL`s |
+| Midas | [`0x1e12eeca…`](https://etherscan.io/tx/0x1e12eecadefc574812056cbc9051d057b0f99c78c41e84691bae36fdbfaf67e4) | *unidentified* `0xa0c74afc` | 265,313 | 223,351 | +41,962 | **0** (0.00%) | 0 | under the floor | 20 (14S/4C/2L2) | **call-dominated** — 4 of 6 receipt logs produced inside the replayed `CALL`s |
+| Midas | [`0xdc8fcd5a…`](https://etherscan.io/tx/0xdc8fcd5a80986694166ff02d3f6380ce01246dd043f6abeecda19cdba7e17eec) | *unidentified* `0x2c0a90a9` | 146,391 | 153,917 | -7,526 | **0** (0.00%) | 0 | replay costs more | 10 (7S/2C/1L2) |  |
 | Snapshot | [`0x7cbed6fc…`](https://etherscan.io/tx/0x7cbed6fc639c0190a49c40a08a783f72ea139c31e5c05310f03477be632487aa) | DelegateRegistry `setDelegate` ✓ `0xbd86e508` | 46,927 | 55,776 | -8,849 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L4) |  |
 | Snapshot | [`0xedb0f7be…`](https://etherscan.io/tx/0xedb0f7be3d0539a6442f0c86cf08aba995fa8b6f4bda8a181dd8aab1b22d018f) | DelegateRegistry `setDelegate` ✓ `0xbd86e508` | 46,747 | 55,596 | -8,849 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L4) |  |
 | Gitcoin | [`0xa5c2fea2…`](https://etherscan.io/tx/0xa5c2fea27689a1aa1fe0cda700eab32ee0f53175ad99c2afe2cc0f4caa13b423) | GTC `transfer` ✓ `0xa9059cbb` | 100,501 | 118,905 | -18,404 | **0** (0.00%) | 0 | replay costs more | 9 (6S/2L2/1L3) |  |

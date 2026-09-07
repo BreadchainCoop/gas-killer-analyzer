@@ -1507,6 +1507,50 @@ Three measured, all 0.00%. Every one records **8 `Store`s and 1 `Log4`** and rep
 transaction. It is the same structural negative as EAS, at a larger size. Two transactions
 stayed on the heuristic estimator and are excluded.
 
+## Midas — the first RWA protocol, and the first non-call-blocked win in a while
+
+Midas issues tokenised treasury and yield products (mTBILL, mBASIS, mEDGE, mMEV, mF-ONE). It is
+the best result since Chronicle: **12 measured, 9 saving, best 23.54%, mean 10.21%** — and
+unlike Aragon's wins, the best ones are not an artifact of hidden work behind a `CALL`.
+
+**Finding the vaults without guessing them.** Five of six token addresses verified (the mBTC
+address carried in the longlist returns codesize 0 and was dropped). The vaults were not assumed:
+a 28-day census reported entry points by `to`, and the recurring ones were then confirmed by
+calling `mToken()` on each and checking it returns a verified Midas token. Four passed. A fifth
+recurring address (`0x3ef3d8ba…`) reverts on `mToken()` and was excluded rather than counted.
+The multi-million-gas transactions in the raw census are CoW Settlement and LiFi routes that
+merely touch a Midas token — not Midas.
+
+**Results by function**, 120 direct vault transactions in 28 days (4.29/day):
+
+| function | selector | n | gas | saving | shape |
+|---|---|---:|---:|---:|---|
+| `depositInstant` | `0xc02dd27a` | 34 | 340,326 | **80,116 (23.54%)** | 3S/2C/1L3 — **real computation** |
+| `redeemRequest` | `0xbfc2d46a` | 26 | 343,673 | **53,779 (15.65%)** | 7S/1C/1L4 |
+| `redeemInstant` | `0x8b53f75e` | 39 | 687,607 | **59,912 (8.71%)** | 6C/2S/1L3 — call-dominated |
+| *unidentified* | `0xa0c74afc` | 16 | 295,179 | 0 | under the floor |
+| *unidentified* | `0x2c0a90a9` | 5 | 146,391 | 0 | replay costs more |
+
+**Why `depositInstant` is the interesting row.** Its recorded program is 3 `Store`s, 2 `Call`s
+and 1 `Log3`, and only 2 of its 3 receipt logs are produced inside a call. Base estimate is
+**62% of gas used** — meaning roughly 130,000 gas of the 340,326 is work the vault does itself:
+oracle price reads, fee arithmetic, daily-limit accounting. That is genuine computation being
+removed, the same profile that made Kelp and Chronicle the strongest results in this survey. It
+is not the Aragon pattern, where the percentage was really a measure of what the encoder could
+not see.
+
+`redeemInstant` is the Aragon pattern: 18 of its 19 receipt logs come from inside the six
+replayed calls, base is 84% of gas, and the saving is a near-constant ~60,000 regardless of
+whether the transaction costs 675,000 or 688,000 gas — fixed vault overhead, not something that
+scales with the work.
+
+**The money is still small.** 4.29 vault transactions/day at 47,294 gas mean saving is 6.1M
+gas/month = **$2.89/month** at the 0.192 gwei these transactions actually paid, or $301/month at
+20 gwei. A 23.54% win on an RWA mint is a good percentage attached to almost no volume — the
+same verdict as Kelp, whose 83% is worth $25/month.
+
+Two selectors could not be identified and are labelled unidentified rather than guessed.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is
