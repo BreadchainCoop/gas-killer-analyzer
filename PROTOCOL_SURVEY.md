@@ -1286,8 +1286,9 @@ making them.
 
 ## Aragon — real savings, but they are the plugin's bookkeeping around a replayed call
 
-Aragon OSx is live on mainnet and it does save gas: five of eight measured transactions clear
-the 50,000 floor, the best at **21.59%** (182,847 gas) and the largest at 468,738 gas absolute.
+Aragon OSx is live on mainnet and it does save gas: **all six** measured `execute` transactions
+clear the 50,000 floor, the best at **24.15%** (295,062 gas) and the largest at 468,738 gas
+absolute. No other entry point saves anything (19 measured in total).
 That is the first non-zero result since Chronicle. It is still not a candidate, for two reasons
 that are worth separating.
 
@@ -1322,7 +1323,7 @@ entry points — and `execute` is not even the common one:
 |---|---|---:|---:|---|
 | `approve(uint256,bool)` | `0x747442d3` | 25 | 81,408 | +2,024 surplus, **under the floor** |
 | `createProposal(...)` | `0xfbd56e41` | 14 | up to 4,933,009 | **replay costs more**, every one |
-| `execute(uint256)` | `0xfe0d94c1` | 10 | 1,419,945 | the only type that saves |
+| `execute(uint256)` | `0xfe0d94c1` | 10 | 1,419,945 | the only type that saves — 6 of 6 measured |
 | *unidentified* | `0xe978afe5` | 1 | 413,213 | **replay costs more** |
 
 `createProposal` is the interesting negative. At 4.9M gas it is the largest Aragon transaction
@@ -1334,17 +1335,36 @@ pattern holds across all seven measured, from 34 stores at 674,728 gas to 265 at
 `approve` — the most common Aragon transaction at 25 of 50 direct — is 2 `Store`s and a log,
 with a surplus of ~2,000 gas against a 50,000 floor. It would need the floor to fall by 25×.
 
-So across 18 measured transactions and four entry points, savings exist only in `execute`, only
-because a `CALL` hides the real work, and only at 2.89 executions/day.
+So across 19 measured transactions and four entry points, savings exist only in `execute`, only
+because a `CALL` hides the real work, and only at 0.357 plugin executions/day.
 
-**The volume is negligible.** 81 executions in 28 days = **2.89/day**. At 189,327 gas mean
-saving across the eight measured, that is 16.4M gas/month — **$18/month** at the 0.453 gwei
-median these transactions actually paid, or $813/month at 20 gwei. Governance execution is
-inherently low-frequency; this is a rounding error next to Aave's $1,392/month.
+**On the excluded rows.** Five transactions across Frax and Aragon would not come off the
+heuristic estimator and were excluded rather than scored. Re-running them to see what the
+heuristic had claimed: three agreed with their measured siblings at 0.00%, one
+(`0xefa82f36…`, the 0-log Fraxswap swap) turned out to be a **reverted transaction** the
+analyzer refuses outright (`Error: transaction failed`), and one — Aragon `0x9a11baf5…` —
+claimed **25.78%**. That last one was worth chasing: eight retries got it measured at
+**24.15%**, making it Aragon's best row. The heuristic had overstated it by 1.63 points,
+understating the base by ~20,000 gas, consistent with its known optimistic bias (`Call` priced
+at zero, fresh `SSTORE`s charged 5,000 against ~20,000 actual). Notably the Frax swap
+`0xace12218…` came back at 0.00% from a heuristic base **14,000 below** its measured siblings'
+— a negative that survives its own error term.
+
+**The volume is negligible.** The qualifying rate is **0.357/day** — 10 direct plugin
+`execute` calls in 28 days. At 301,614 gas mean saving across the six, that is 3.2M gas/month
+= **$3.62/month** at the 0.453 gwei median these transactions actually paid, or $160/month at
+20 gwei. Governance execution is inherently low-frequency; this is a rounding error next to
+Aave's $1,392/month.
+
+> **Correction.** An earlier version of this section put the rate at 2.89/day and the value at
+> $18/month, taking all 81 transactions that emit an OSx `Executed` log over 28 days. That is
+> wrong by 8×: only 10 of those enter through an Aragon plugin. The other 71 arrive via Safe
+> `execTransaction` and other third-party entry points, where the Aragon work is nested inside
+> a `CALL` and the transaction scores as a Safe (0%). Only the plugin-entry calls qualify.
 
 | | qualifying txs/day | mean saving | **$/month** | at 20 gwei |
 |---|---:|---:|---:|---:|
-| Aragon | 2.89 (`execute` only) | 189,327 gas | **$18** | $813 |
+| Aragon | 0.357 (`execute` only) | 301,614 gas | **$3.62** | $160 |
 
 ## What this is actually worth in dollars
 

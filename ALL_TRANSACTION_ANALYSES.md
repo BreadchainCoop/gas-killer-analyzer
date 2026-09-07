@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-316 Ethereum mainnet transactions across 29 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
+317 Ethereum mainnet transactions across 29 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -136,7 +136,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Mellow** | 5 | 5 | **41.55%** | 30.00% | — |
 | **Chronicle** | 24 | 17 | **32.64%** | 30.17% | under the floor (4), replay costs more (3) |
 | **Privacy Pools** | 11 | 2 | **19.47%** | 18.00% | replay costs more (9) |
-| **Aragon** | 18 | 5 | **21.59%** | 3.56% | replay costs more (11), under the floor (2); all wins **call-dominated**, and only `execute` ever saves |
+| **Aragon** | 19 | 6 | **24.15%** | 4.64% | replay costs more (11), under the floor (2); all wins **call-dominated**, and only `execute` ever saves — 6 of 6 |
 | **Ondo** | 8 | 2 | **12.09%** | 6.51% | under the floor (3), replay costs more (3) |
 | **Ether.fi** | 13 | 2 | **11.09%** | 5.61% | replay costs more (6), under the floor (5) |
 | **Puffer** | 2 | 1 | *7.06%* | *7.06%* | replay costs more (1); **label inferred — entry point unidentified, do not quote** |
@@ -1112,6 +1112,7 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Sky | [`0x1c77d8ed…`](https://etherscan.io/tx/0x1c77d8edef60f73522dfe4b551680d7f3ed0d12e53b146fae31a3af0f5539fe6) | sUSDS `transfer` ✓ `0xa9059cbb` | 56,380 | 62,836 | -6,456 | **0** (0.00%) | 0 | replay costs more | 3 (1L3/2S) |  |
 | Sky | [`0x765e023f…`](https://etherscan.io/tx/0x765e023f53a0822981195b2c5711f9a1c973c951a3488856ecdfb01ac6b48f7c) | USDS `transfer` ✓ `0xa9059cbb` | 56,336 | 62,836 | -6,500 | **0** (0.00%) | 0 | replay costs more | 3 (1L3/2S) |  |
 | Sky | [`0xd1ddae6d…`](https://etherscan.io/tx/0xd1ddae6dade88620d7be1aea762b7881998f1040dea2900a71e7126b6ea23a6e) | DaiUsds `daiToUsds` ✓ `0xf2c07aae` | 132,007 | 151,437 | -19,430 | **0** (0.00%) | 0 | replay costs more | 4 (3C/1L3) |  |
+| Aragon | [`0x9a11baf5…`](https://etherscan.io/tx/0x9a11baf52820a8b6fa0b7c3402a190163ec8ab5152d43d6667df83a43c81c331) | plugin `execute` ✓ `0xfe0d94c1` | 1,221,959 | 876,897 | +345,062 | **295,062** (24.15%) | 0 | — | 3 (1S/1C/1L2) | **call-dominated** — 32 of 33 receipt logs produced inside the replayed `CALL`; recovered from heuristic (claimed 25.78%) |
 | Aragon | [`0x3a73cbfe…`](https://etherscan.io/tx/0x3a73cbfe82d45d522aafa83acbc4a44dd89a2b409530e3a52d0076009a036c78) | plugin `execute` ✓ `0xfe0d94c1` | 8,364,080 | 7,845,342 | +518,738 | **468,738** (5.60%) | 0 | — | 3 (1S/1C/1L2) | **call-dominated** — 13 of 14 receipt logs produced inside the replayed `CALL` |
 | Aragon | [`0x5f809f01…`](https://etherscan.io/tx/0x5f809f01d5e1a520a5320b2d090ef762a214fd5bbd29f376bf03f2c9dd8ecec5) | plugin `execute` ✓ `0xfe0d94c1` | 2,928,005 | 2,629,545 | +298,460 | **248,460** (8.49%) | 0 | — | 3 (1S/1C/1L2) | **call-dominated** — 123 of 124 receipt logs produced inside the replayed `CALL` |
 | Aragon | [`0x8418c9cf…`](https://etherscan.io/tx/0x8418c9cf72855a8e980dd72f7d3a657e5995b3eefe7fd0f61fafffd3810ee551) | plugin `execute` ✓ `0xfe0d94c1` | 2,563,458 | 2,037,722 | +525,736 | **475,736** (18.56%) | 0 | — | 3 (1S/1C/1L2) | **call-dominated** — 56 of 57 receipt logs produced inside the replayed `CALL` |
