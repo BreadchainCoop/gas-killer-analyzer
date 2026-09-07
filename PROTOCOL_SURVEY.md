@@ -1413,6 +1413,39 @@ here supports an 85% win on a `handleOps` transaction.
 
 One transaction stayed on the heuristic estimator after four attempts and is excluded.
 
+## EAS — an attestation is its own state change
+
+Ethereum Attestation Service is the purest bookkeeping negative in this survey. Eleven
+transactions measured, every one of the four live entry points covered, nothing saved, and no
+row needed excluding.
+
+**Volume first.** A 28-day log scan over the EAS core and the SchemaRegistry found 44
+transactions — **1.6/day**, of which 41 are direct. Attribution is clean (EAS is called
+directly, not through routers), but the ceiling is lower than Aragon's before percentages are
+even considered.
+
+| type | selector | n | median gas | result |
+|---|---|---:|---:|---|
+| `attest` | `0xf17325e7` | 24 | 327,202 | replay costs more |
+| `multiTimestamp` | `0xe71ff365` | 9 | 46,657 | replay costs more |
+| `register` (SchemaRegistry) | `0x60d7a278` | 7 | 139,211 | replay costs more |
+| `multiAttest` | `0x44adc90e` | 1 | 2,546,830 | replay costs more |
+
+**Why every one fails.** An attestation is data written to storage. `multiAttest` at 2,546,830
+gas records **100 `Store`s, 4 `Log4`s and 1 `Call`**; a 545,839-gas `attest` records **23
+`Store`s and 1 `Log4`**. There is no verification step, no proof check, no computation of any
+kind to remove — the transaction *is* its state change, and GasKiller's replacement program has
+to perform every one of those writes itself. `base_estimate` exceeds `gas_used` on all eleven,
+by 22,954 to 259,385 gas.
+
+This is floor-independent. EAS scores 0.00% at a floor of zero, and would still score 0.00% if
+signature verification were free.
+
+It is worth stating plainly because EAS looks superficially attractive — large transactions,
+millions of gas, a clear protocol identity, direct calls. Size is not surplus. What matters is
+the ratio of computation to bookkeeping, and for an attestation service that ratio is zero by
+design.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is

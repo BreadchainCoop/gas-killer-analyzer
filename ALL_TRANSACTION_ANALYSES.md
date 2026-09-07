@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-326 Ethereum mainnet transactions across 30 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
+337 Ethereum mainnet transactions across 31 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -155,6 +155,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Swell** | 3 | 0 | **0.00%** | — | replay costs more (2), under the floor (1) |
 | **Sky** | 9 | 0 | **0.00%** | — | replay costs more (9) |
 | **ZeroDev** | 9 | 0 | **0.00%** | — | replay costs more (9) |
+| **EAS** | 11 | 0 | **0.00%** | — | replay costs more (11) |
 | **Frax** | 10 | 0 | **0.00%** | — | replay costs more (10); router rows are **call-blocked**, not empty — see `CALL_BLOCKED_CANDIDATES.md` |
 
 ## ENS: 18 transactions, 18 measured, nothing saved
@@ -1113,6 +1114,17 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Sky | [`0x1c77d8ed…`](https://etherscan.io/tx/0x1c77d8edef60f73522dfe4b551680d7f3ed0d12e53b146fae31a3af0f5539fe6) | sUSDS `transfer` ✓ `0xa9059cbb` | 56,380 | 62,836 | -6,456 | **0** (0.00%) | 0 | replay costs more | 3 (1L3/2S) |  |
 | Sky | [`0x765e023f…`](https://etherscan.io/tx/0x765e023f53a0822981195b2c5711f9a1c973c951a3488856ecdfb01ac6b48f7c) | USDS `transfer` ✓ `0xa9059cbb` | 56,336 | 62,836 | -6,500 | **0** (0.00%) | 0 | replay costs more | 3 (1L3/2S) |  |
 | Sky | [`0xd1ddae6d…`](https://etherscan.io/tx/0xd1ddae6dade88620d7be1aea762b7881998f1040dea2900a71e7126b6ea23a6e) | DaiUsds `daiToUsds` ✓ `0xf2c07aae` | 132,007 | 151,437 | -19,430 | **0** (0.00%) | 0 | replay costs more | 4 (3C/1L3) |  |
+| EAS | [`0xcb068c52…`](https://etherscan.io/tx/0xcb068c521d567965d0773333a6890e366d3428e86b015b2d111b353129dba8be) | EAS `multiAttest` ✓ `0x44adc90e` | 2,546,830 | 2,806,215 | -259,385 | **0** (0.00%) | 0 | replay costs more | 105 (100S/4L4/1C) |  |
+| EAS | [`0xa6d232b3…`](https://etherscan.io/tx/0xa6d232b3196a03647493807a7f8b24785397c037eea05d3367bd2d023f0c092a) | EAS `attest` ✓ `0xf17325e7` | 545,839 | 583,699 | -37,860 | **0** (0.00%) | 0 | replay costs more | 24 (23S/1L4) |  |
+| EAS | [`0x001628e1…`](https://etherscan.io/tx/0x001628e13d64e27053791f44172e220b0eaee981238113171a2794efb41b1f62) | EAS `attest` ✓ `0xf17325e7` | 524,905 | 565,059 | -40,154 | **0** (0.00%) | 0 | replay costs more | 24 (23S/1L4) |  |
+| EAS | [`0x8e5ff8aa…`](https://etherscan.io/tx/0x8e5ff8aa7ac32a56efb5733331e4c0d1a78a34374762332c956e7f059267f060) | EAS `attest` ✓ `0xf17325e7` | 522,644 | 557,956 | -35,312 | **0** (0.00%) | 0 | replay costs more | 23 (22S/1L4) |  |
+| EAS | [`0x27de14a6…`](https://etherscan.io/tx/0x27de14a62cfd1e040aa0dca72dfdf039e098dbec6e885df57919c324fdd65a1a) | EAS `attest` ✓ `0xf17325e7` | 432,047 | 464,993 | -32,946 | **0** (0.00%) | 0 | replay costs more | 20 (19S/1L4) |  |
+| EAS | [`0x435f638f…`](https://etherscan.io/tx/0x435f638f942ddd9925e57ad2c65d04c4f3ed375c3579572743e7c964f90b32b6) | EAS `attest` ✓ `0xf17325e7` | 409,295 | 439,863 | -30,568 | **0** (0.00%) | 0 | replay costs more | 19 (18S/1L4) |  |
+| EAS | [`0xdc789cb3…`](https://etherscan.io/tx/0xdc789cb32bd4a89cf9aab8889fb96d1f140d1b6e2cffcb474c124ff143821528) | EAS `attest` ✓ `0xf17325e7` | 389,922 | 422,287 | -32,365 | **0** (0.00%) | 0 | replay costs more | 14 (12S/1L4/1C) |  |
+| EAS | [`0x09b8d89e…`](https://etherscan.io/tx/0x09b8d89ed6712a559d1900f71fb450e83571ce55bf483c77685594fd4be59cb3) | SchemaRegistry `register` ✓ `0x60d7a278` | 364,292 | 406,567 | -42,275 | **0** (0.00%) | 0 | replay costs more | 16 (15S/1L2) |  |
+| EAS | [`0xac28c020…`](https://etherscan.io/tx/0xac28c020e311cfaae896fd2c7efe329a4c7994a7d568f4eebdf76f46df2c4122) | EAS `attest` ✓ `0xf17325e7` | 327,202 | 356,912 | -29,710 | **0** (0.00%) | 0 | replay costs more | 13 (11S/1L4/1C) |  |
+| EAS | [`0x7393d4b5…`](https://etherscan.io/tx/0x7393d4b51bfebddafe47583f6156fae9294483e79b46c4141130f99c82917455) | EAS `attest` ✓ `0xf17325e7` | 271,239 | 294,193 | -22,954 | **0** (0.00%) | 0 | replay costs more | 14 (13S/1L4) |  |
+| EAS | [`0x574099f6…`](https://etherscan.io/tx/0x574099f673c7450d52c576682d7e65312c8b0b3cc01f573e7bd7476cdc620d9c) | EAS `multiTimestamp` ✓ `0xe71ff365` | 267,640 | 335,511 | -67,871 | **0** (0.00%) | 0 | replay costs more | 20 (10S/10L3) |  |
 | ZeroDev | [`0xbf9ddaa7…`](https://etherscan.io/tx/0xbf9ddaa7ebd2a1cde46693b1467b4007c76f190b58ff2c8307a57e5515751718) | EntryPoint `handleOps`, 1 userOp from a **Kernel v3.1** account | 622,870 | 679,189 | -56,319 | **0** (0.00%) | 0 | replay costs more | 9 (4S/4C/1L1) |  |
 | ZeroDev | [`0x048854ab…`](https://etherscan.io/tx/0x048854ab2d10688db8e8fdcddc93d3966587ad51c0408a8e46cef391c1f8ab16) | EntryPoint `handleOps`, 1 userOp from a **Kernel v3.1** account | 594,900 | 668,985 | -74,085 | **0** (0.00%) | 0 | replay costs more | 9 (4S/4C/1L1) |  |
 | ZeroDev | [`0x83a6114c…`](https://etherscan.io/tx/0x83a6114cb84fccf4f54bebb27bf848d392371ccb24c7ad15e0115303438d2da8) | EntryPoint `handleOps`, 1 userOp from a **Kernel** account | 474,560 | 565,299 | -90,739 | **0** (0.00%) | 0 | replay costs more | 9 (4S/4C/1L1) |  |
