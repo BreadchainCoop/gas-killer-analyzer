@@ -1446,6 +1446,35 @@ millions of gas, a clear protocol identity, direct calls. Size is not surplus. W
 the ratio of computation to bookkeeping, and for an attestation service that ratio is zero by
 design.
 
+## Gitcoin Passport — not on this chain; Gitcoin on mainnet is a token
+
+The longlist entry is "Gitcoin Passport". **Passport does not run on Ethereum mainnet.** Its
+decoder address returns codesize 0 here; the system lives on Optimism and Base, where its
+stamps are EAS attestations. There is nothing to measure on this chain, and the longlist entry
+should be read as out of scope rather than as a negative result.
+
+What Gitcoin does have on mainnet is the GTC token — and only the token. A 28-day log scan
+across GTC, the Gitcoin Governor, the Timelock and the TokenDistributor found 5,439
+transactions touching them (194/day, 1,883 direct), but **the Governor, Timelock and
+TokenDistributor had zero direct transactions in the entire window**. Every direct call is an
+ERC-20 operation:
+
+| type | selector | n | median gas |
+|---|---|---:|---:|
+| `transfer` | `0xa9059cbb` | 1,095 | 39,918 |
+| `approve` | `0x095ea7b3` | 703 | 46,540 |
+| `transferFrom` | `0x23b872dd` | 79 | 38,023 |
+| `delegate` | `0x5c19a95c` | 6 | 95,579 |
+
+Five measured, none saving. `delegate` was the only one worth checking — it writes voting
+checkpoints, so it is the closest thing here to computation — and it still replays above cost
+(95,579 used against 111,457). The transfers behave like every other ERC-20 transfer in this
+survey.
+
+This is the same shape as Sky and the Frax token rows: a token contract's transaction *is* its
+state change. It is recorded for completeness, not because a token was ever a plausible
+candidate.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is
