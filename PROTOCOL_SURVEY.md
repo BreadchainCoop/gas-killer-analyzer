@@ -360,7 +360,8 @@ estimator rather than a verdict on the protocol.
 **Scope caveat.** These are transactions to the shared ERC-4337 EntryPoint
 (`0x0000000071727De22E5E9d8BAf0edAc6f37da032` v0.7,
 `0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789` v0.6). The wallet vendor behind each userOp
-was never identified. ZeroDev specifically has **not** been measured.
+was never identified. (ZeroDev has since been measured separately — see the ZeroDev section.
+Nine clean single-userOp Kernel transactions, all 0.00%.)
 
 ### The measurements
 
@@ -1365,6 +1366,52 @@ Aave's $1,392/month.
 | | qualifying txs/day | mean saving | **$/month** | at 20 gwei |
 |---|---:|---:|---:|---:|
 | Aragon | 0.357 (`execute` only) | 301,614 gas | **$3.62** | $160 |
+
+## ZeroDev — measured at last, and it is a clean negative
+
+The ERC-4337 section of this file carried a scope caveat: those eight rows are transactions to
+the shared EntryPoint, the wallet vendor behind each userOp was never identified, and **ZeroDev
+specifically had not been measured**. It has now.
+
+**Identifying ZeroDev without guessing.** A userOp's sender is a smart account, so the vendor is
+whatever sits in the account's ERC-1967 implementation slot. Reading that slot and calling
+`eip712Domain()` on each implementation returns the wallet's own name — `"Kernel"` for ZeroDev,
+against `"Coinbase Smart Wallet"`, `"LightAccount"` and `"SmartWallet"` for the others. Four live
+Kernel implementations were confirmed this way: v3.1 (`0xbAC849bB…`), v3.0 (`0x94F097E1…`),
+v2.4 (`0xd3F582F6…`) and `0xd830d15d…`. In a 13-hour sample, **105 of 6,534** sender accounts
+were Kernels — about 1.6% of mainnet userOp traffic.
+
+Only **single-userOp** transactions were measured. A bundle mixing a Kernel op with a Coinbase
+op cannot be credited to either vendor, and mis-attribution of exactly this kind is what forced
+the earlier rows to be relabelled from "ZeroDev" to "ERC-4337 EntryPoint".
+
+**The result.** Nine measured, zero savings, and not one is close:
+
+| gas used | base estimate | surplus |
+|---:|---:|---:|
+| 622,870 | 679,189 | -56,319 |
+| 594,900 | 668,985 | -74,085 |
+| 474,560 | 565,299 | -90,739 |
+| 429,858 | 487,060 | -57,202 |
+| 332,571 | 402,041 | -69,470 |
+| 211,416 | 252,106 | -40,690 |
+| 182,649 | 224,499 | -41,850 |
+| 162,270 | 200,964 | -38,694 |
+| 145,146 | 183,816 | -38,670 |
+
+`base_estimate` exceeds `gas_used` on all nine, so this is floor-independent: ZeroDev scores
+0.00% at a floor of zero. Every row has the identical shape — **4 `Store`s, 4 `Call`s, 1 `Log1`**
+— which is the EntryPoint's own accounting (deposit debit, nonce bump, `UserOperationEvent`)
+wrapped around calls whose contents are dropped. The account's actual work happens inside those
+calls and is invisible; what remains is bookkeeping that costs more to replay than to execute.
+
+**This also bears on the two suspect rows.** The ERC-4337 section flags two wins at 85.18% and
+81.88% as probable replay artifacts, marked do-not-quote. Nine clean measurements of the same
+transaction type, all strongly negative, are consistent with those two being artifacts rather
+than real. It is not proof — a different bundler and a different account shape — but nothing
+here supports an 85% win on a `handleOps` transaction.
+
+One transaction stayed on the heuristic estimator after four attempts and is excluded.
 
 ## What this is actually worth in dollars
 

@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-317 Ethereum mainnet transactions across 29 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
+326 Ethereum mainnet transactions across 30 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -154,6 +154,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Umbra** | 8 | 0 | **0.00%** | — | replay costs more (8) |
 | **Swell** | 3 | 0 | **0.00%** | — | replay costs more (2), under the floor (1) |
 | **Sky** | 9 | 0 | **0.00%** | — | replay costs more (9) |
+| **ZeroDev** | 9 | 0 | **0.00%** | — | replay costs more (9) |
 | **Frax** | 10 | 0 | **0.00%** | — | replay costs more (10); router rows are **call-blocked**, not empty — see `CALL_BLOCKED_CANDIDATES.md` |
 
 ## ENS: 18 transactions, 18 measured, nothing saved
@@ -1112,6 +1113,15 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Sky | [`0x1c77d8ed…`](https://etherscan.io/tx/0x1c77d8edef60f73522dfe4b551680d7f3ed0d12e53b146fae31a3af0f5539fe6) | sUSDS `transfer` ✓ `0xa9059cbb` | 56,380 | 62,836 | -6,456 | **0** (0.00%) | 0 | replay costs more | 3 (1L3/2S) |  |
 | Sky | [`0x765e023f…`](https://etherscan.io/tx/0x765e023f53a0822981195b2c5711f9a1c973c951a3488856ecdfb01ac6b48f7c) | USDS `transfer` ✓ `0xa9059cbb` | 56,336 | 62,836 | -6,500 | **0** (0.00%) | 0 | replay costs more | 3 (1L3/2S) |  |
 | Sky | [`0xd1ddae6d…`](https://etherscan.io/tx/0xd1ddae6dade88620d7be1aea762b7881998f1040dea2900a71e7126b6ea23a6e) | DaiUsds `daiToUsds` ✓ `0xf2c07aae` | 132,007 | 151,437 | -19,430 | **0** (0.00%) | 0 | replay costs more | 4 (3C/1L3) |  |
+| ZeroDev | [`0xbf9ddaa7…`](https://etherscan.io/tx/0xbf9ddaa7ebd2a1cde46693b1467b4007c76f190b58ff2c8307a57e5515751718) | EntryPoint `handleOps`, 1 userOp from a **Kernel v3.1** account | 622,870 | 679,189 | -56,319 | **0** (0.00%) | 0 | replay costs more | 9 (4S/4C/1L1) |  |
+| ZeroDev | [`0x048854ab…`](https://etherscan.io/tx/0x048854ab2d10688db8e8fdcddc93d3966587ad51c0408a8e46cef391c1f8ab16) | EntryPoint `handleOps`, 1 userOp from a **Kernel v3.1** account | 594,900 | 668,985 | -74,085 | **0** (0.00%) | 0 | replay costs more | 9 (4S/4C/1L1) |  |
+| ZeroDev | [`0x83a6114c…`](https://etherscan.io/tx/0x83a6114cb84fccf4f54bebb27bf848d392371ccb24c7ad15e0115303438d2da8) | EntryPoint `handleOps`, 1 userOp from a **Kernel** account | 474,560 | 565,299 | -90,739 | **0** (0.00%) | 0 | replay costs more | 9 (4S/4C/1L1) |  |
+| ZeroDev | [`0x1a82bbc2…`](https://etherscan.io/tx/0x1a82bbc236311d674b4609c84e36f4988fbe636b823507344dc84c26c66ced68) | EntryPoint `handleOps`, 1 userOp from a **Kernel v3.0** account | 429,858 | 487,060 | -57,202 | **0** (0.00%) | 0 | replay costs more | 11 (5C/4S/1L3/1L1) |  |
+| ZeroDev | [`0xd0598f41…`](https://etherscan.io/tx/0xd0598f411c9d1aec316ff875ec2877e4de10474bfabbe6ee155cb1ab547dc0a5) | EntryPoint `handleOps`, 1 userOp from a **Kernel** account | 332,571 | 402,041 | -69,470 | **0** (0.00%) | 0 | replay costs more | 9 (4S/4C/1L1) |  |
+| ZeroDev | [`0xb41e3e28…`](https://etherscan.io/tx/0xb41e3e2848acb069f5fd02bf2b62ca1c0e134368e5a59327e5861104fd954e3b) | EntryPoint `handleOps`, 1 userOp from a **Kernel v3.0** account | 211,416 | 252,106 | -40,690 | **0** (0.00%) | 0 | replay costs more | 9 (4S/4C/1L1) |  |
+| ZeroDev | [`0x038ded9a…`](https://etherscan.io/tx/0x038ded9abc1b7936548fdfcdebd920c59a2d3fd004e467a6512bb91dd5a495f0) | EntryPoint `handleOps`, 1 userOp from a **Kernel** account | 182,649 | 224,499 | -41,850 | **0** (0.00%) | 0 | replay costs more | 9 (4S/4C/1L1) |  |
+| ZeroDev | [`0x6a01cb04…`](https://etherscan.io/tx/0x6a01cb04154fa3077dc686bcdf0d3c034d703cd4e3665cb3e776d916af3aa0fd) | EntryPoint `handleOps`, 1 userOp from a **Kernel v2.4** account | 162,270 | 200,964 | -38,694 | **0** (0.00%) | 0 | replay costs more | 9 (4S/4C/1L1) |  |
+| ZeroDev | [`0xcabc8ae7…`](https://etherscan.io/tx/0xcabc8ae7254a9bef80ddf6d8f6276d6b8bb2a3d000f6a5b2265007814250c2eb) | EntryPoint `handleOps`, 1 userOp from a **Kernel v2.4** account | 145,146 | 183,816 | -38,670 | **0** (0.00%) | 0 | replay costs more | 9 (4S/4C/1L1) |  |
 | Aragon | [`0x9a11baf5…`](https://etherscan.io/tx/0x9a11baf52820a8b6fa0b7c3402a190163ec8ab5152d43d6667df83a43c81c331) | plugin `execute` ✓ `0xfe0d94c1` | 1,221,959 | 876,897 | +345,062 | **295,062** (24.15%) | 0 | — | 3 (1S/1C/1L2) | **call-dominated** — 32 of 33 receipt logs produced inside the replayed `CALL`; recovered from heuristic (claimed 25.78%) |
 | Aragon | [`0x3a73cbfe…`](https://etherscan.io/tx/0x3a73cbfe82d45d522aafa83acbc4a44dd89a2b409530e3a52d0076009a036c78) | plugin `execute` ✓ `0xfe0d94c1` | 8,364,080 | 7,845,342 | +518,738 | **468,738** (5.60%) | 0 | — | 3 (1S/1C/1L2) | **call-dominated** — 13 of 14 receipt logs produced inside the replayed `CALL` |
 | Aragon | [`0x5f809f01…`](https://etherscan.io/tx/0x5f809f01d5e1a520a5320b2d090ef762a214fd5bbd29f376bf03f2c9dd8ecec5) | plugin `execute` ✓ `0xfe0d94c1` | 2,928,005 | 2,629,545 | +298,460 | **248,460** (8.49%) | 0 | — | 3 (1S/1C/1L2) | **call-dominated** — 123 of 124 receipt logs produced inside the replayed `CALL` |
