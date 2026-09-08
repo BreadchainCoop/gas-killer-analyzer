@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-392 Ethereum mainnet transactions across 39 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
+400 Ethereum mainnet transactions across 40 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -165,6 +165,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Centrifuge** | 5 | 0 | **0.00%** | — | under the floor (5); the Hub's own work is a fixed ~9,000 gas — **5 more `multicall` rows could not be measured**, 3 a replay defect and 2 rate-limited |
 | **Maple** | 10 | 0 | **0.00%** | — | replay costs more (8), under the floor (2); the two `transfer` rows **miss the floor by under 1,800 gas** and are not call-blocked |
 | **Backed** | 8 | 0 | **0.00%** | — | under the floor (6), replay costs more (2); no calls in any program — `delegatedTransfer` has the most removable work at ~19,200 gas |
+| **Securitize** | 8 | 0 | **0.00%** | — | replay costs more (6), under the floor (2); every `transfer` routes compliance through a `CALL` — **1.14M gas yields 3,777 removable** |
 
 ## ENS: 18 transactions, 18 measured, nothing saved
 
@@ -1243,6 +1244,14 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Backed | [`0x70511eca…`](https://etherscan.io/tx/0x70511ecaef102db385ade9a6e905b422a8b71c0194d62142f5c5b66ba9f63f79) | bIB01 `transfer` ✓ `0xa9059cbb` | 71,605 | 62,788 | +8,817 | **0** (0.00%) | 0 | under the floor | 3 (2S/1L3) |  |
 | Backed | [`0x9ce9a348…`](https://etherscan.io/tx/0x9ce9a348491105f52ef8abb8ccb0f3109672896221ae10430b25089ad6012fa9) | bIB01 `approve` ✓ `0x095ea7b3` | 53,955 | 55,564 | -1,609 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L3) |  |
 | Backed | [`0xf97e7f64…`](https://etherscan.io/tx/0xf97e7f647f38888ed38486574e83eaf2c017db5d1c5161c0bc4bbc283405e0ed) | bCSPX `approve` ✓ `0x095ea7b3` | 53,955 | 55,564 | -1,609 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L3) |  |
+| Securitize | [`0xc4f53606…`](https://etherscan.io/tx/0xc4f5360627c891eb7155ded5898e8eed2f333ef34c4c9d548999b3160b202c16) | BUIDL `burn` ✓ `0x15f570dc` | 105,697 | 90,605 | +15,092 | **0** (0.00%) | 0 | under the floor | 10 (1C/7S/1L2/1L3) | the only BUIDL row with real surplus — an **admin** function that does its accounting inline |
+| Securitize | [`0x2f838199…`](https://etherscan.io/tx/0x2f83819933c4a9d645f00d51e738b25a4181f6e49e9f0ed42f8372c2ecd6cb8c) | BUIDL `transfer` ✓ `0xa9059cbb` | 1,139,537 | 1,135,760 | +3,777 | **0** (0.00%) | 0 | under the floor | 6 (1C/4S/1L3) | 1.14M gas yields 3,777 removable — all the work is inside the compliance `CALL` |
+| Securitize | [`0xe6a62fbc…`](https://etherscan.io/tx/0xe6a62fbc8f5ba4f8404ac6df89e1c2f0ec0a3e090bc84f8d217a083793036fe2) | BUIDL `transfer` ✓ `0xa9059cbb` | 183,672 | 186,148 | -2,476 | **0** (0.00%) | 0 | replay costs more | 9 (1C/7S/1L3) | the median transfer |
+| Securitize | [`0x8457c64c…`](https://etherscan.io/tx/0x8457c64cf0289168cbb7a1095d3ceeef47883b59a9384259c72128b2f13bffa6) | BUIDL `transfer` ✓ `0xa9059cbb` | 1,006,353 | 1,009,921 | -3,568 | **0** (0.00%) | 0 | replay costs more | 9 (1C/7S/1L3) |  |
+| Securitize | [`0x73e61f0f…`](https://etherscan.io/tx/0x73e61f0feed41e55104d8d43f98074c2fdde26f096060790e5c7ab394c0a6acb) | BUIDL `transfer` ✓ `0xa9059cbb` | 247,639 | 251,283 | -3,644 | **0** (0.00%) | 0 | replay costs more | 8 (1C/6S/1L3) | 4.6x smaller than the 1.14M row, deficit differs by 76 gas |
+| Securitize | [`0x6c124186…`](https://etherscan.io/tx/0x6c124186b7dad8c99db0278fdab0d059b042130ef705896d1bd8e7006d3476c8) | BUIDL `transfer` ✓ `0xa9059cbb` | 194,060 | 201,907 | -7,847 | **0** (0.00%) | 0 | replay costs more | 11 (1C/9S/1L3) |  |
+| Securitize | [`0xb1ae64fe…`](https://etherscan.io/tx/0xb1ae64fe8f4c859d3935a84abbd48837b738ce29a9882fcd05bb7c435c7872d4) | BUIDL `transfer` ✓ `0xa9059cbb` | 223,465 | 235,605 | -12,140 | **0** (0.00%) | 0 | replay costs more | 12 (1C/10S/1L3) |  |
+| Securitize | [`0xb15aed83…`](https://etherscan.io/tx/0xb15aed838f48052ac212d5a70cd70fb9eaa8368dc01f6974b71f7b1965ab5c00) | BUIDL `approve` ✓ `0x095ea7b3` | 51,183 | 54,916 | -3,733 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L3) | the only program with no call, and the only one that touches no compliance logic |
 
 ## Transactions that could not be measured at all
 

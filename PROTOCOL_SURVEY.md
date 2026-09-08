@@ -1831,6 +1831,72 @@ would be worth nothing if it did.
 
 **Worth $0/month.** These transactions paid a median 0.443 gwei.
 
+## Securitize (BUIDL) — the most expensive transfer measured, and the least removable
+
+BUIDL is BlackRock's USD Institutional Digital Liquidity Fund, issued on Securitize's DS
+Protocol: `0x7712c342…f8aA2AEc`, a 703-byte proxy, supply 211,939,358 (~$212M). Two other
+addresses carried for ACRED and VBILL return codesize 0 and were dropped. **8 measured, 0
+saving.**
+
+**The census made it look like the best RWA candidate yet.** A BUIDL `transfer` costs **183,672
+gas at the median, with three above 1,000,000** — against 71,593 for Backed and 106,124 for
+Maple's Syrup pool. Something was spending 110,000 gas beyond a plain transfer, and the question
+was whether it was inline computation or a call.
+
+| entry point | selector | function | n | median gas |
+|---|---|---|---:|---:|
+| BUIDL | `0xa9059cbb` | `transfer` | 27 | 183,672 |
+| BUIDL | `0x15f570dc` | `burn(address,uint256,string)` | 1 | 105,697 |
+| BUIDL | `0x095ea7b3` | `approve` | 1 | 51,183 |
+
+A burn taking a *reason string* is the DS Protocol signature — this is a regulated-securities
+token, not a generic ERC-20.
+
+**It is a call, and the answer is unambiguous.**
+
+| gas used | base | surplus | function | program |
+|---:|---:|---:|---|---|
+| 1,139,537 | 1,135,760 | +3,777 | `transfer` | 1C/4S/1L3 |
+| 1,006,353 | 1,009,921 | -3,568 | `transfer` | 1C/7S/1L3 |
+| 247,639 | 251,283 | -3,644 | `transfer` | 1C/6S/1L3 |
+| 223,465 | 235,605 | -12,140 | `transfer` | 1C/10S/1L3 |
+| 194,060 | 201,907 | -7,847 | `transfer` | 1C/9S/1L3 |
+| 183,672 | 186,148 | -2,476 | `transfer` | 1C/7S/1L3 |
+| 105,697 | 90,605 | **+15,092** | `burn` | 1C/7S/1L2/1L3 |
+| 51,183 | 54,916 | -3,733 | `approve` | 1S/1L3 |
+
+**Every transfer program contains exactly one `Call`.** Transfer gas ranges over **6.2x** — 183,672
+to 1,139,537 — while the recorded program stays at 6-12 state updates and the surplus stays within
+±12,000 of zero. All of that variation lives inside the compliance-service `CALL`, which the
+encoder records as one opaque instruction and replay re-executes in full. A 1.14M-gas transfer
+yields 3,777 gas of removable work; a 247,639-gas transfer yields -3,644, a difference of 76 gas
+across a 4.6x change in size.
+
+The `burn` is the control that proves the point: **the only row with real surplus (+15,092), and
+the only user-visible one that is an admin function** doing its accounting inline rather than
+routing through compliance. The `approve` is the only program with no call at all.
+
+### Three permissioned RWA tokens, three different answers
+
+Maple, Backed and Securitize look identical on every screening dimension this survey uses:
+permissioned tokens, directly called, fully measured, real institutional assets behind them. They
+are not close to each other.
+
+| protocol | transfer gas | removable | why |
+|---|---:|---:|---|
+| Maple (syrupUSDC) | 106,124 | **48,316** | share/asset arithmetic, inline |
+| Backed (bCSPX) | 71,593 | 8,841 | allowlist lookup — a storage read, inline |
+| Securitize (BUIDL) | 183,672 | ~0 | compliance service, **behind a `CALL`** |
+
+The protocol that spends the *most* gas per transfer removes the *least*. Gas cost carries no
+information about whether this scheme can help; only the location and the kind of work do. That
+is the sharpest statement of the survey's screen this file has: **work must be computation, and it
+must be in the contract that was called.** BUIDL fails the second condition while spending more
+than either protocol that passes it.
+
+At 1.80 transactions/day BUIDL is also the lowest-volume protocol measured, so even a good
+percentage would have been worth nothing. **$0/month**; median 0.246 gwei.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is
