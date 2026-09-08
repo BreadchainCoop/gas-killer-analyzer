@@ -1551,6 +1551,82 @@ same verdict as Kelp, whose 83% is worth $25/month.
 
 Two selectors could not be identified and are labelled unidentified rather than guessed.
 
+## Grove — an institutional allocator with no directly-callable surface
+
+Grove is a Sky ecosystem "Star" running the Grove Liquidity Layer (GLL), a fork of
+`spark-alm-controller`. It allocates USDS-denominated capital into tokenised credit and
+ERC-7540 funds. **9 measured, 0 saving.** The reason is structural and worth stating precisely,
+because it is the mirror image of the Aragon result.
+
+**Finding it without guessing.** Two rounds of web search returned three wrong addresses,
+including a "GROVE" token that turned out to be a Telegram memecoin. The contracts were found
+on-chain instead: scanning 60,000 blocks for the `RateLimitDecreaseTriggered` /
+`RateLimitIncreaseTriggered` topics surfaced **four** ALM deployments at once, and tracing one
+transaction from each recovered its controller and proxy.
+
+| | |
+|---|---|
+| ALM Proxy | `0x491edfb0…a30f3a44e` (2,274 B) |
+| MainnetController | `0xfd9dea9a…a392a9f5` (23,121 B) |
+| RateLimits | `0x5f5cfcb8…112df19a` (2,805 B) |
+| Operator Safe | `0x9187807e…17a29179` (171 B — Safe proxy) |
+
+The same scan located Spark's liquidity layer (5,903 rate-limit logs to Grove's 76) and two
+further Sky stars, which is a reusable way to enumerate this whole family.
+
+**There is no direct entry point.** 97 Grove transactions in 27.8 days — 3.49/day — and **96 of
+them enter through the operator Safe** as `execTransaction`. The 97th is a one-off governance
+spell. A separate scan of 7,200 blocks for the entire ALM function family (`mintUSDS`,
+`swapUSDSToUSDC`, `depositERC4626`, `requestDepositERC7540` and ten more) found **zero** direct
+calls to any ALM controller on mainnet, Spark's included. These contracts are only ever reached
+from behind a multisig.
+
+**What the analyzer actually records.** The trace shape is Safe proxy → `DELEGATECALL` singleton
+→ `DELEGATECALL` MultiSend → `CALL` controller. `trace.rs:255` drops what is nested *below* that
+last hop, but it records the hop itself as a `Call` instruction carrying the controller's
+calldata. So the state-update program for a 998,513-gas allocation is three instructions:
+
+```
+1: Store(slot 0x05, ...)                                    <- the Safe's own nonce
+2: Call(0xfd9dea9a..., 0x536f6b7e...)   mintUSDS
+3: Call(0xfd9dea9a..., 0x5acb7053...)   swapUSDSToUSDC
+4: Call(0xfd9dea9a..., 0x4d8f42b2...)   addLiquidityUniswapV3
+5: Log2(...)                                                <- ExecutionSuccess
+```
+
+Replaying that program **re-executes the entire ALM operation**. Nothing is removed, which is why
+the base estimate tracks gas used to within 11,950–20,791 across transactions spanning 124,428 to
+2,283,620 gas — an 18x range with an essentially constant residual. That residual is the Safe's
+own signature checking, and it is **below the 50,000 floor in every case**. Even at a zero floor
+the best row here would be 1.7%.
+
+| gas used | base estimate | surplus | program | receipt logs | inner ALM calls |
+|---:|---:|---:|---|---:|---|
+| 2,283,620 | 2,287,372 | **-3,752** | 1C | 24 | governance spell |
+| 998,513 | 983,468 | +15,045 | 3C/1S/1L2 | 35 | `mintUSDS`, `swapUSDSToUSDC`, `addLiquidityUniswapV3` |
+| 833,788 | 821,836 | +11,952 | 3C/1S/1L2 | 38 | `mintUSDS`, `swapUSDSToUSDC`, `depositERC4626` |
+| 690,600 | 678,650 | +11,950 | 3C/1S/1L2 | 31 | `claimRedeemERC7540`, `swapUSDCToUSDS`, `burnUSDS` |
+| 660,286 | 642,381 | +17,905 | 2C/1S/1L2 | 18 | `withdrawERC4626`, `swapUniswapV3` |
+| 583,854 | 565,937 | +17,917 | 2C/1S/1L2 | 18 | `withdrawERC4626`, `swapUniswapV3` |
+| 542,909 | 530,945 | +11,964 | 3C/1S/1L2 | 26 | `mintUSDS`, `swapUSDSToUSDC`, `transferAsset` |
+| 502,204 | 487,940 | +14,264 | 2C/1S/1L2 | 25 | `swapUSDCToUSDS`, `burnUSDS` |
+| 124,428 | 103,637 | +20,791 | 1C/1S/1L2 | 3 | `transferAsset` |
+
+**The mirror image of Aragon.** Both are call-dominated — the recorded program is a handful of
+`Call`s and the receipt logs are produced inside them. In Aragon the replayed calls were *cheap*
+relative to the plugin's own bookkeeping, so the percentage came out high and flattered a saving
+that was really a measure of encoder blindness. Here the replayed calls carry *all* the gas, so
+the percentage collapses to zero. Same defect, opposite sign — which is a useful confirmation
+that the receipt-log diagnostic was measuring what it claimed to.
+
+**Worth $0/month**, at any gas price, because no row clears the floor. These transactions paid a
+median 0.128 gwei.
+
+Selectors were recovered by pulling the function list from `grove-labs/grove-alm-controller` and
+hashing locally; all ten resolved, including
+`addLiquidityUniswapV3(address,uint256,(int24,int24),(uint256,uint256),(uint256,uint256),uint256)`,
+whose struct parameters have to be expanded to tuples before the hash matches.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is
