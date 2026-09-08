@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-400 Ethereum mainnet transactions across 40 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
+406 Ethereum mainnet transactions across 41 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -166,6 +166,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Maple** | 10 | 0 | **0.00%** | — | replay costs more (8), under the floor (2); the two `transfer` rows **miss the floor by under 1,800 gas** and are not call-blocked |
 | **Backed** | 8 | 0 | **0.00%** | — | under the floor (6), replay costs more (2); no calls in any program — `delegatedTransfer` has the most removable work at ~19,200 gas |
 | **Securitize** | 8 | 0 | **0.00%** | — | replay costs more (6), under the floor (2); every `transfer` routes compliance through a `CALL` — **1.14M gas yields 3,777 removable** |
+| **OriginTrail** | 6 | 0 | **0.00%** | — | replay costs more (6); TRAC token only — the knowledge graph runs on NeuroWeb, not mainnet |
 
 ## ENS: 18 transactions, 18 measured, nothing saved
 
@@ -1252,6 +1253,12 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Securitize | [`0x6c124186…`](https://etherscan.io/tx/0x6c124186b7dad8c99db0278fdab0d059b042130ef705896d1bd8e7006d3476c8) | BUIDL `transfer` ✓ `0xa9059cbb` | 194,060 | 201,907 | -7,847 | **0** (0.00%) | 0 | replay costs more | 11 (1C/9S/1L3) |  |
 | Securitize | [`0xb1ae64fe…`](https://etherscan.io/tx/0xb1ae64fe8f4c859d3935a84abbd48837b738ce29a9882fcd05bb7c435c7872d4) | BUIDL `transfer` ✓ `0xa9059cbb` | 223,465 | 235,605 | -12,140 | **0** (0.00%) | 0 | replay costs more | 12 (1C/10S/1L3) |  |
 | Securitize | [`0xb15aed83…`](https://etherscan.io/tx/0xb15aed838f48052ac212d5a70cd70fb9eaa8368dc01f6974b71f7b1965ab5c00) | BUIDL `approve` ✓ `0x095ea7b3` | 51,183 | 54,916 | -3,733 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L3) | the only program with no call, and the only one that touches no compliance logic |
+| OriginTrail | [`0xa2463933…`](https://etherscan.io/tx/0xa2463933a4955e28299826a516213b164becb37565cbc5b69d593c6dac1983e6) | TRAC `transfer` ✓ `0xa9059cbb` | 54,492 | 62,860 | -8,368 | **0** (0.00%) | 0 | replay costs more | 3 (2S/1L3) | base is identical to Maple's SYRUP transfer — the encoder prices a plain ERC-20 consistently |
+| OriginTrail | [`0xa0c3b18b…`](https://etherscan.io/tx/0xa0c3b18b89eb279373bf03ddf568a0459de937610812508b1be91ed14f25464a) | TRAC `approve` ✓ `0x095ea7b3` | 46,633 | 55,552 | -8,919 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L3) |  |
+| OriginTrail | [`0xb3393932…`](https://etherscan.io/tx/0xb339393289a16e7bd82b9fd55d37f03d72d0a2a4a6ad35f0fb030201d300a978) | TRAC `transferFrom` ✓ `0x23b872dd` | 38,387 | 48,965 | -10,578 | **0** (0.00%) | 0 | replay costs more | 3 (2S/1L3) |  |
+| OriginTrail | [`0x4f499e5f…`](https://etherscan.io/tx/0x4f499e5f696edc69d4f16f55095fc37b315a507cb7be0d6884cda59a74732f04) | TRAC `transfer` ✓ `0xa9059cbb` | 37,356 | 45,736 | -8,380 | **0** (0.00%) | 0 | replay costs more | 3 (2S/1L3) | the median transfer |
+| OriginTrail | [`0x06521132…`](https://etherscan.io/tx/0x06521132be699f5aa9f832ff4cbdcb1c5b7a750f9342413aa4f68b4a78257dab) | TRAC `transfer` ✓ `0xa9059cbb` | 32,556 | 40,840 | -8,284 | **0** (0.00%) | 0 | replay costs more | 3 (2S/1L3) |  |
+| OriginTrail | [`0xa319ada9…`](https://etherscan.io/tx/0xa319ada90f587f25b61adc347512cc153564c9ca82143f97307ac40366eabbf7) | TRAC `approve` ✓ `0x095ea7b3` | 24,312 | 32,848 | -8,536 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L3) | smallest transaction measured in this file |
 
 ## Transactions that could not be measured at all
 

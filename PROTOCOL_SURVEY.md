@@ -1897,6 +1897,50 @@ than either protocol that passes it.
 At 1.80 transactions/day BUIDL is also the lowest-volume protocol measured, so even a good
 percentage would have been worth nothing. **$0/month**; median 0.246 gwei.
 
+## OriginTrail — token only, and a volume trap worth naming
+
+TRAC (`0xaA7a9CA8…8d0F0A6F`, "Trace Token", 11,995 B, 500M supply) is all OriginTrail has on
+Ethereum mainnet. The Decentralized Knowledge Graph — node staking, sharding, knowledge-asset
+publishing — runs on NeuroWeb, its Polkadot parachain. **6 measured, 0 saving**, every row
+negative. Same shape as Gitcoin.
+
+**The volume trap.** The raw census reports 23,216 transactions in 27.8 days (835.78/day), which
+looks like the third-highest volume in this survey. Two of the busiest entry points are not
+OriginTrail at all:
+
+| address | codesize | n (of 350) | median gas | what it is |
+|---|---:|---:|---:|---|
+| `0x278d858f…` | 687 B | 86 | ~122-128,000 | proxy to `0x617e169f…`, which calls the **Uniswap V4 PoolManager** |
+| `0x7ec8a30a…` | 352 B | 35 | 2,123,067 | proxy, same category |
+
+Both were traced rather than counted. Including them would have inflated OriginTrail's volume by
+about half and filed 2.1M-gas Uniswap routes under a knowledge-graph protocol — the mistake
+already recorded against two Ondo rows in `ALL_TRANSACTION_ANALYSES.md`. **A high `to`-count for a
+token address is not the protocol's volume; it is the token's popularity with other people's
+bots.**
+
+OriginTrail's own direct surface, after filtering: `transfer` 105/350, `approve` 8, `transferFrom`
+4 — roughly **279/day at a 37,356-gas median**, maximum 54,492.
+
+| tx | function | gas used | base | surplus |
+|---|---|---:|---:|---:|
+| `0xa2463933…` | `transfer` | 54,492 | 62,860 | -8,368 |
+| `0xa0c3b18b…` | `approve` | 46,633 | 55,552 | -8,919 |
+| `0xb3393932…` | `transferFrom` | 38,387 | 48,965 | -10,578 |
+| `0x4f499e5f…` | `transfer` | 37,356 | 45,736 | -8,380 |
+| `0x06521132…` | `transfer` | 32,556 | 40,840 | -8,284 |
+| `0xa319ada9…` | `approve` | 24,312 | 32,848 | -8,536 |
+
+The deficit is fixed near 8,400 across a 2.2x range of transaction sizes. A plain ERC-20 transfer
+has nothing to remove and a small fixed replay overhead, so it lands slightly negative — the same
+result as GTC, SYRUP and every bare token in this file.
+
+One cross-check worth recording: TRAC's 54,492-gas transfer replays for **62,860**, the identical
+figure Maple's SYRUP transfer produced. Two unrelated tokens converging on the same base is
+evidence the encoder prices a standard transfer consistently rather than noisily.
+
+**Worth $0/month.**
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is
