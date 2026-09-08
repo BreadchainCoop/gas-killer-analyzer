@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-384 Ethereum mainnet transactions across 38 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
+392 Ethereum mainnet transactions across 39 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -164,6 +164,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Grove** | 10 | 0 | **0.00%** | — | under the floor (9), replay costs more (1); **no directly-callable surface** — 96 of 97 transactions enter through the operator Safe |
 | **Centrifuge** | 5 | 0 | **0.00%** | — | under the floor (5); the Hub's own work is a fixed ~9,000 gas — **5 more `multicall` rows could not be measured**, 3 a replay defect and 2 rate-limited |
 | **Maple** | 10 | 0 | **0.00%** | — | replay costs more (8), under the floor (2); the two `transfer` rows **miss the floor by under 1,800 gas** and are not call-blocked |
+| **Backed** | 8 | 0 | **0.00%** | — | under the floor (6), replay costs more (2); no calls in any program — `delegatedTransfer` has the most removable work at ~19,200 gas |
 
 ## ENS: 18 transactions, 18 measured, nothing saved
 
@@ -1234,6 +1235,14 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Maple | [`0x4d261f84…`](https://etherscan.io/tx/0x4d261f847797252c35cf26a72e36cdd61be3da431d0ca9b53e27944e114be669) | syrupUSDC `transfer` ✓ `0xa9059cbb` | 110,936 | 62,704 | +48,232 | **0** (0.00%) | 0 | under the floor | 3 (2S/1L3) | **near miss, 1,768 short** — no calls, receipt log count matches the program exactly |
 | Maple | [`0x12007073…`](https://etherscan.io/tx/0x120070735fe7bda85a35d96c581cd2f78e40b800f1e209b984b1ab5007d8f34e) | syrupUSDC `transfer` ✓ `0xa9059cbb` | 106,124 | 57,808 | +48,316 | **0** (0.00%) | 0 | under the floor | 3 (2S/1L3) | **near miss, 1,684 short** — base is 54% of gas, all of it real removable work |
 | Maple | [`0xff1716df…`](https://etherscan.io/tx/0xff1716df9e01e61d0e8e677264f9f3f32d2d001cf9b399c7e652f94626396ad8) | SYRUP `transfer` ✓ `0xa9059cbb` | 56,552 | 62,860 | -6,308 | **0** (0.00%) | 0 | replay costs more | 3 (2S/1L3) | the plain governance token — same program shape, but nothing to compute |
+| Backed | [`0xb3784101…`](https://etherscan.io/tx/0xb3784101e2cacea7fb60fb285dee295465634ef3279d2400d6a28103203e980c) | bCSPX `delegatedTransfer` ✓ `0xaea77ac3` | 67,795 | 48,557 | +19,238 | **0** (0.00%) | 0 | under the floor | 4 (3S/1L3) | signature recovery is real work — base is only 72% of gas, best ratio in Backed |
+| Backed | [`0x42bff98b…`](https://etherscan.io/tx/0x42bff98b46ab5a5f4904c328b670779558c5779992c951ded2bd760cb40573f5) | bIB01 `delegatedTransfer` ✓ `0xaea77ac3` | 67,807 | 48,581 | +19,226 | **0** (0.00%) | 0 | under the floor | 4 (3S/1L3) |  |
+| Backed | [`0xba99e558…`](https://etherscan.io/tx/0xba99e5586a0a9c45490395906e07c4fb85150af04fcd93f3f69aa3e80c67f881) | bIB01 `delegatedTransfer` ✓ `0xaea77ac3` | 67,763 | 48,569 | +19,194 | **0** (0.00%) | 0 | under the floor | 4 (3S/1L3) |  |
+| Backed | [`0xd0e8461e…`](https://etherscan.io/tx/0xd0e8461ed75b4172c47af168d99b3f975ca5216b46ccbe295149ecf6d4e328d3) | bCSPX `transfer` ✓ `0xa9059cbb` | 71,593 | 62,752 | +8,841 | **0** (0.00%) | 0 | under the floor | 3 (2S/1L3) | base 88% of gas — the permission check is cheap |
+| Backed | [`0xb53155a0…`](https://etherscan.io/tx/0xb53155a0231b72f408ecaa42bd8b503825ea87fec156ca59fefa6e5a1ac96bab) | bCSPX `transfer` ✓ `0xa9059cbb` | 71,581 | 62,740 | +8,841 | **0** (0.00%) | 0 | under the floor | 3 (2S/1L3) |  |
+| Backed | [`0x70511eca…`](https://etherscan.io/tx/0x70511ecaef102db385ade9a6e905b422a8b71c0194d62142f5c5b66ba9f63f79) | bIB01 `transfer` ✓ `0xa9059cbb` | 71,605 | 62,788 | +8,817 | **0** (0.00%) | 0 | under the floor | 3 (2S/1L3) |  |
+| Backed | [`0x9ce9a348…`](https://etherscan.io/tx/0x9ce9a348491105f52ef8abb8ccb0f3109672896221ae10430b25089ad6012fa9) | bIB01 `approve` ✓ `0x095ea7b3` | 53,955 | 55,564 | -1,609 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L3) |  |
+| Backed | [`0xf97e7f64…`](https://etherscan.io/tx/0xf97e7f647f38888ed38486574e83eaf2c017db5d1c5161c0bc4bbc283405e0ed) | bCSPX `approve` ✓ `0x095ea7b3` | 53,955 | 55,564 | -1,609 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L3) |  |
 
 ## Transactions that could not be measured at all
 

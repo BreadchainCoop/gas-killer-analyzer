@@ -1772,6 +1772,65 @@ marginal cases — the same transaction was a win at the old 27,000 floor.
 
 **Worth $0/month.** These transactions paid a median 0.316 gwei.
 
+## Backed — permissioned securities, and the cheapest permission check measured
+
+Backed Finance issues tokenised securities as thin proxies over a shared
+`BackedTokenImplementation`. **8 measured, 0 saving**, and the interesting part is that nothing
+is hidden: every program has **zero calls** and exactly one receipt log, so each measurement is a
+complete account of the transaction.
+
+Three contracts verified on-chain; a fourth address carried for `bNIU` returns codesize 0 and was
+dropped rather than reported as inactive.
+
+| token | address | codesize |
+|---|---|---:|
+| Backed IB01 $ Treasury Bond 0-1yr (`bIB01`) | `0xCA30c93B…0B435Fb5` | 2,138 B |
+| Backed CSPX Core S&P 500 (`bCSPX`) | `0x1e2C4fb7…e8801D59` | 2,138 B |
+| Wrapped Backed IB01 (`wbIB01`) | `0xCA2A7068…4b945712F` | 2,188 B |
+
+Because these are proxies and `DELEGATECALL` is followed by the encoder, the implementation's work
+is visible — the 2,138-byte proxy hop costs nothing in blindness.
+
+**Volume is the smallest of any protocol measured recently**: 68 transactions in 27.8 days
+(2.45/day), of which 38 are direct calls to a Backed token. `wbIB01` had no activity at all in the
+window.
+
+**Results by function.**
+
+| function | selector | gas used | base | surplus | program |
+|---|---|---:|---:|---:|---|
+| `delegatedTransfer` | `0xaea77ac3` | 67,795 | 48,557 | **+19,238** | 3S/1L3 |
+| `delegatedTransfer` | `0xaea77ac3` | 67,807 | 48,581 | +19,226 | 3S/1L3 |
+| `delegatedTransfer` | `0xaea77ac3` | 67,763 | 48,569 | +19,194 | 3S/1L3 |
+| `transfer` | `0xa9059cbb` | 71,593 | 62,752 | +8,841 | 2S/1L3 |
+| `transfer` | `0xa9059cbb` | 71,581 | 62,740 | +8,841 | 2S/1L3 |
+| `transfer` | `0xa9059cbb` | 71,605 | 62,788 | +8,817 | 2S/1L3 |
+| `approve` | `0x095ea7b3` | 53,955 | 55,564 | -1,609 | 1S/1L3 |
+| `approve` | `0x095ea7b3` | 53,955 | 55,564 | -1,609 | 1S/1L3 |
+
+`0xaea77ac3` was identified as
+`delegatedTransfer(address,address,uint256,uint256,uint8,bytes32,bytes32)` by decoding the
+calldata first — 7 words: from, to, value, deadline, v, r, s — and confirming the hash locally.
+It is a meta-transaction transfer where a relayer pays gas for the holder.
+
+**`delegatedTransfer` beats `transfer` on a smaller transaction.** 67,795 gas with base at 72%,
+against 71,593 gas with base at 88% — more than double the surplus on 4,000 *less* gas. The
+difference is `ecrecover`: signature verification is pure computation and exactly what this scheme
+removes, whereas a plain `transfer`'s allowlist lookup is a storage read that has to happen on
+replay too.
+
+**The comparison that matters is with Maple.** A Backed permissioned transfer removes 8,841 gas; a
+Syrup pool-token transfer removes 48,316. Both are permissioned RWA tokens, both have zero calls,
+both are fully measured. The gap is that Syrup's transfer runs share accounting — converting
+between shares and assets at the current exchange rate — while Backed's runs an allowlist check
+and nothing more. **"Permissioned token" is not by itself a signal; what matters is whether the
+permission logic computes or merely reads.**
+
+Even Backed's best row needs the floor cut by 61% to qualify, and at 2.45 transactions/day it
+would be worth nothing if it did.
+
+**Worth $0/month.** These transactions paid a median 0.443 gwei.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is
