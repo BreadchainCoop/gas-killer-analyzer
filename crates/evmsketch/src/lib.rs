@@ -316,6 +316,9 @@ impl EvmSketchExecutorCache {
 }
 
 /// What one executor-cache lookup cost.
+///
+/// Only this crate constructs one, so the field set may grow.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExecutorLookup {
     /// Whether the executor was already cached, so no build was paid for.
@@ -325,6 +328,9 @@ pub struct ExecutorLookup {
 }
 
 /// What one gas estimate cost, split by bottleneck.
+///
+/// Only this crate constructs one, so the field set may grow.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EstimateTimings {
     /// Time fetching account and slot state up front: one `eth_getProof` per hinted address.
@@ -944,6 +950,11 @@ impl Extraction {
 /// branches of one `tokio::try_join!`, so on a cache miss the build hides behind the fetch and
 /// the elapsed time of the pair is roughly the larger of the two, not the total. Every other
 /// pair is sequential and may be added.
+///
+/// Deliberately exhaustive, unlike the structs that carry it: consumers build one to exercise
+/// their own reporting, and a new phase here means a new series they have to decide how to
+/// publish. A compile error is the right way to tell them; silently defaulting a phase to zero
+/// would leave real cost unattributed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EncodePhaseTimings {
     /// Time awaiting trace RPCs: `debug_traceCall` on the struct-log path, or the two cheap
@@ -964,6 +975,9 @@ pub struct EncodePhaseTimings {
 }
 
 /// What an encode run extracted for one call.
+///
+/// Only this crate constructs one, so the field set may grow.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct EncodedStateUpdates {
     /// The ABI-encoded state-update program: the payload that gets signed and applied on-chain.
