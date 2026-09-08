@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-406 Ethereum mainnet transactions across 41 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
+414 Ethereum mainnet transactions across 42 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -167,6 +167,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Backed** | 8 | 0 | **0.00%** | — | under the floor (6), replay costs more (2); no calls in any program — `delegatedTransfer` has the most removable work at ~19,200 gas |
 | **Securitize** | 8 | 0 | **0.00%** | — | replay costs more (6), under the floor (2); every `transfer` routes compliance through a `CALL` — **1.14M gas yields 3,777 removable** |
 | **OriginTrail** | 6 | 0 | **0.00%** | — | replay costs more (6); TRAC token only — the knowledge graph runs on NeuroWeb, not mainnet |
+| **UMA** | 8 | 0 | **0.00%** | — | replay costs more (6), under the floor (2); OOv2 and the DVM have **zero mainnet traffic** — Polymarket settles on Polygon |
 
 ## ENS: 18 transactions, 18 measured, nothing saved
 
@@ -1259,6 +1260,14 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | OriginTrail | [`0x4f499e5f…`](https://etherscan.io/tx/0x4f499e5f696edc69d4f16f55095fc37b315a507cb7be0d6884cda59a74732f04) | TRAC `transfer` ✓ `0xa9059cbb` | 37,356 | 45,736 | -8,380 | **0** (0.00%) | 0 | replay costs more | 3 (2S/1L3) | the median transfer |
 | OriginTrail | [`0x06521132…`](https://etherscan.io/tx/0x06521132be699f5aa9f832ff4cbdcb1c5b7a750f9342413aa4f68b4a78257dab) | TRAC `transfer` ✓ `0xa9059cbb` | 32,556 | 40,840 | -8,284 | **0** (0.00%) | 0 | replay costs more | 3 (2S/1L3) |  |
 | OriginTrail | [`0xa319ada9…`](https://etherscan.io/tx/0xa319ada90f587f25b61adc347512cc153564c9ca82143f97307ac40366eabbf7) | TRAC `approve` ✓ `0x095ea7b3` | 24,312 | 32,848 | -8,536 | **0** (0.00%) | 0 | replay costs more | 2 (1S/1L3) | smallest transaction measured in this file |
+| UMA | [`0x0cea2092…`](https://etherscan.io/tx/0x0cea209233ae636e1110489fc2fc83659c39c7e2b21632d27cdf176915e0860b) | *third-party asserter* `0x9b1a5b13` | 341,649 | 306,233 | +35,416 | **0** (0.00%) | 0 | under the floor | — | **not a UMA contract** — `0x51881a1c…` (8,530 B) calls OOv3 internally; the 35,416 removable belongs to the asserter |
+| UMA | [`0x82b3d1d2…`](https://etherscan.io/tx/0x82b3d1d2c78ff38295dbdc722d34be91798583e8f59b4b001bda999169a57c0b) | UMA `transfer` ✓ `0xa9059cbb` | 47,061 | 45,700 | +1,361 | **0** (0.00%) | 0 | under the floor | — | the median transfer; vote-delegation bookkeeping is worth only 1,361 gas |
+| UMA | [`0x48a00d13…`](https://etherscan.io/tx/0x48a00d13264c03984e0cd0e777b5c0d1368791dd85619a77d8e27b3673d0db31) | UMA `transferFrom` ✓ `0x23b872dd` | 55,015 | 61,024 | -6,009 | **0** (0.00%) | 0 | replay costs more | — |  |
+| UMA | [`0xe7d8edcc…`](https://etherscan.io/tx/0xe7d8edccf986b37758c87dbcb0f741dbbd4c66abe64856d29948c46a9a2ce917) | OOv3 `settleAssertion` ✓ `0x4124beef` | 73,850 | 85,370 | -11,520 | **0** (0.00%) | 0 | replay costs more | — | fixed-cost settlement — 20 of 20 instances at 73,850/73,838 gas |
+| UMA | [`0x1f86efe7…`](https://etherscan.io/tx/0x1f86efe700854b6fc991b355e2d7b96b8bf781e46171979a145f08272c786d18) | OOv3 `settleAssertion` ✓ `0x4124beef` | 73,850 | 85,370 | -11,520 | **0** (0.00%) | 0 | replay costs more | — |  |
+| UMA | [`0xe6064d8f…`](https://etherscan.io/tx/0xe6064d8f09da6c0dfcda3b87195e0a747b257d9e784c1f369b41b0c741cdd25c) | OOv3 `settleAssertion` ✓ `0x4124beef` | 73,838 | 85,358 | -11,520 | **0** (0.00%) | 0 | replay costs more | — |  |
+| UMA | [`0x68d8e07d…`](https://etherscan.io/tx/0x68d8e07d8db8a83f08a78b05fe62533d1cc8c590a79f33a71ce471c003301d90) | UMA `transfer` ✓ `0xa9059cbb` | 176,237 | 202,604 | -26,367 | **0** (0.00%) | 0 | replay costs more | — | gas outlier, most negative row |
+| UMA | [`0x8e9901d6…`](https://etherscan.io/tx/0x8e9901d6dc68b0f9ce6691573799e8db1a05ca7e5e0cf558471bda638526740c) | UMA `approve` ✓ `0x095ea7b3` | 46,597 | 55,552 | -8,955 | **0** (0.00%) | 0 | replay costs more | — |  |
 
 ## Transactions that could not be measured at all
 

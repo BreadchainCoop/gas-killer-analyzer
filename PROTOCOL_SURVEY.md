@@ -1941,6 +1941,72 @@ evidence the encoder prices a standard transfer consistently rather than noisily
 
 **Worth $0/month.**
 
+## UMA — the oracle path is fixed-cost bookkeeping, and Polymarket isn't here
+
+UMA was the first genuinely different shape in this stretch: an optimistic oracle, whose dispute
+and settlement paths read a vote tally and resolve an outcome — the profile that made Chronicle
+and Kelp the strongest results in this survey. **8 measured, 0 saving.**
+
+All five contracts verified on-chain: UMA Voting Token v1 (`0x04Fa0d23…`, 9,881 B), Optimistic
+Oracle V3 (`0xfb55F43f…`, 18,038 B), Optimistic Oracle V2 (`0xA0Ae6609…`, 16,861 B), Voting/DVM
+(`0x8B1631ab…`, 18,574 B), Finder (`0x40f941E4…`, 2,178 B).
+
+**Polymarket is not on mainnet.** OOv2 and the DVM have **zero transactions in 27.8 days**.
+Polymarket — which drives essentially all UMA assertion traffic — settles on Polygon. So the
+high-volume oracle activity that made UMA interesting is on another chain, and mainnet OOv3 runs
+at **1.69/day**.
+
+| entry point | selector | function | n | median gas |
+|---|---|---|---:|---:|
+| OOv3 (direct) | `0x4124beef` | `settleAssertion(bytes32)` | 20 | 73,850 |
+| asserter `0x51881a1c…` (8,530 B) | `0x9b1a5b13` | *third party* | 27 | 341,649 |
+| UMA token | `0xa9059cbb` | `transfer` | 163 | 47,061 |
+
+**The trace looked promising and the measurement said no.**
+
+```
+CALL OOv3 settleAssertion       gas=73,850
+  CALL USDC transfer            gas=23,552   <- replayed whole
+```
+
+Only 23,552 gas sits inside the nested call, leaving ~50,000 in OOv3 itself — right at the floor.
+But all three measured instances came out **negative**: 73,850 gas against a base of 85,370, a
+deficit of 11,520, identical to the gas on every instance. That ~50,000 is *storage writes* —
+marking the assertion settled, zeroing the bond, recording the resolution — and replay redoes
+every one.
+
+**This is the second time tonight that trace arithmetic misled a prediction** (the first was
+Centrifuge's `updateRestriction`, where ~40% of gas looked like Hub work and measured at ~8%).
+Worth stating as a rule: subtracting a nested call's gas from the total shows what *isn't hidden*
+from the encoder; it says nothing about whether the remainder is computation or bookkeeping. Only
+measurement separates those, and bookkeeping is the more common answer.
+
+The uniformity is itself the result: 20 of 20 `settleAssertion` instances cost 73,850 or 73,838
+gas. A fixed-cost path with no variable computation has nothing to remove no matter how many
+assertions are settled.
+
+| tx | function | gas used | base | surplus |
+|---|---|---:|---:|---:|
+| `0x0cea2092…` | *third-party asserter* | 341,649 | 306,233 | **+35,416** |
+| `0x82b3d1d2…` | UMA `transfer` | 47,061 | 45,700 | +1,361 |
+| `0x48a00d13…` | UMA `transferFrom` | 55,015 | 61,024 | -6,009 |
+| `0x8e9901d6…` | UMA `approve` | 46,597 | 55,552 | -8,955 |
+| `0xe7d8edcc…` | `settleAssertion` | 73,850 | 85,370 | -11,520 |
+| `0x1f86efe7…` | `settleAssertion` | 73,850 | 85,370 | -11,520 |
+| `0xe6064d8f…` | `settleAssertion` | 73,838 | 85,358 | -11,520 |
+| `0x68d8e07d…` | UMA `transfer` | 176,237 | 202,604 | -26,367 |
+
+**The best row is not UMA's.** `0x0cea2092…` at +35,416 is a call to `0x51881a1c…`, a third-party
+asserter contract that calls OOv3 internally — recorded as such rather than counted as UMA, the
+same handling given the two mislabelled Ondo rows. It is a hint worth following: the asserter does
+more removable work than the oracle it calls, so in optimistic-oracle systems the computation
+lives in the *asserting* contracts, not the oracle.
+
+The UMA token's `transfer` at +1,361 is the one bare-token row in this file that is positive
+rather than negative — vote-delegation bookkeeping — and it is worth nothing.
+
+**Worth $0/month.** Median 0.295 gwei.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is
