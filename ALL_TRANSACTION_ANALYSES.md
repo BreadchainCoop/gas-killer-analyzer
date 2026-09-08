@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-369 Ethereum mainnet transactions across 36 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
+374 Ethereum mainnet transactions across 37 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -162,6 +162,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **delegate.xyz** | 3 | 0 | **0.00%** | — | replay costs more (3); found while separating it from Snapshot |
 | **Frax** | 10 | 0 | **0.00%** | — | replay costs more (10); router rows are **call-blocked**, not empty — see `CALL_BLOCKED_CANDIDATES.md` |
 | **Grove** | 10 | 0 | **0.00%** | — | under the floor (9), replay costs more (1); **no directly-callable surface** — 96 of 97 transactions enter through the operator Safe |
+| **Centrifuge** | 5 | 0 | **0.00%** | — | under the floor (5); the Hub's own work is a fixed ~9,000 gas — **5 more `multicall` rows could not be measured**, 3 a replay defect and 2 rate-limited |
 
 ## ENS: 18 transactions, 18 measured, nothing saved
 
@@ -763,11 +764,11 @@ overstatements above have no calls at all. The only safe treatment is re-measure
 Retrying does work, but it can take persistence: `0x707689e3…` needed four separate retry
 rounds before the replay went through.
 
-## The replay defect — why 11 transactions can't be measured, and one silent failure mode
+## The replay defect — why 14 transactions can't be measured, and one silent failure mode
 
-Separate from rate limiting, 11 runs failed with `RevertingContext CALL #n ... reverted`.
-These cluster in **Morpho (7), Euler (2) and Railgun (2)** — and not at all in Lido,
-Chainlink or Pyth.
+Separate from rate limiting, 14 runs failed with `RevertingContext CALL #n ... reverted`.
+These cluster in **Morpho (7), Centrifuge (3), Euler (2) and Railgun (2)** — and not at all in
+Lido, Chainlink or Pyth.
 
 **What happens.** GasKiller records a transaction as a list of state updates and replays
 them to price it. But the recorded steps depend on each other's side effects, and the
@@ -807,6 +808,17 @@ respectively, a 10x divergence with no structural difference.
 
 Nothing in the output distinguishes the second case from a real win. Both are labelled
 `measured via StateChangeHandler` with no warning.
+
+**A second mechanism, found in Centrifuge.** The three Hub `multicall` failures are not
+missing intermediate *state* — they are missing the caller's *identity*. Each records as a
+single `Call` instruction carrying the whole batch, and on replay the callee's
+`onlyManager` check rejects it with `NotManager()` (`0xc0fc8a8a`). The original call
+reached that callee from inside the Hub; the replay arrives from somewhere else. The
+analyzer's own output names the cause — *"a callee re-entered the target contract during
+execution"* — and the trace confirms it: Hub calls `0x19a524d0…`, which calls straight back
+into the Hub. So the defect has two distinct forms: **lost intermediate state** (Morpho,
+Euler, Railgun) and **lost caller context** (Centrifuge). Both are detected and both refuse
+to report, which is the safe branch of the table above.
 
 **One-sentence version:** GasKiller's replay doesn't carry forward the intermediate state
 between a transaction's recorded steps, so chained calls fail on replay — and when a
@@ -1204,6 +1216,11 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Grove | [`0x65276f18…`](https://etherscan.io/tx/0x65276f188f1dc7af9e60f582f87aa09ab34d40556182355c9a4134b3310ac653) | Safe `execTransaction` ✓ `0x6a761202` | 502,204 | 487,940 | +14,264 | **0** (0.00%) | 0 | under the floor | 4 (2C/1S/1L2) | replays `swapUSDCToUSDS`, `burnUSDS` whole — 25 receipt logs, 1 recorded |
 | Grove | [`0x402d3aeb…`](https://etherscan.io/tx/0x402d3aeb8049f2ac33ffbda112e6a16ad9babd4cf1e44d2c10d835d71882dbc1) | Safe `execTransaction` ✓ `0x6a761202` | 146,292 | 125,513 | +20,779 | **0** (0.00%) | 0 | under the floor | 3 (1C/1S/1L2) | replays `transferAsset` whole — 3 receipt logs, 1 recorded |
 | Grove | [`0x3b2f94ca…`](https://etherscan.io/tx/0x3b2f94ca433264748a3534dc3357f0f91015c451008c4521fea21192210e9d4c) | Safe `execTransaction` ✓ `0x6a761202` | 124,428 | 103,637 | +20,791 | **0** (0.00%) | 0 | under the floor | 3 (1C/1S/1L2) | replays `transferAsset` whole — 3 receipt logs, 1 recorded |
+| Centrifuge | [`0xf87748e4…`](https://etherscan.io/tx/0xf87748e4f6f929b7397fd4078ca6eaef7cf7e9d9a55930ed157b338ab5c48fe3) | Hub `updateRestriction` ✓ `0x33bcc1c8` | 779,739 | 770,783 | +8,956 | **0** (0.00%) | 0 | under the floor | 4 (2C/1S/1L2) | surplus is the Hub's fixed dispatch cost; the restriction-hook `CALL` is replayed whole |
+| Centrifuge | [`0x91e3f815…`](https://etherscan.io/tx/0x91e3f8156bf17a2ca6b6354da8ee39fbc39075c89ac4ae23e74b99629be0c2b4) | Hub `updateRestriction` ✓ `0x33bcc1c8` | 657,820 | 648,864 | +8,956 | **0** (0.00%) | 0 | under the floor | 4 (2C/1S/1L2) | same fixed ~9,000 surplus as the 112,968-gas row |
+| Centrifuge | [`0xe3773583…`](https://etherscan.io/tx/0xe3773583af72489947f1d84def8a0d9461aa341609f33d7150d9bc48742102c7) | Hub *unidentified* `0xf3046c8e` | 664,013 | 654,404 | +9,609 | **0** (0.00%) | 0 | under the floor | 4 (2C/1S/1L2) | different function, same ~9,600 surplus |
+| Centrifuge | [`0x9fb032dd…`](https://etherscan.io/tx/0x9fb032ddcdb504db55664e85ef50bcb0992a7d96c5730a67770556d409055941) | Hub `updateRestriction` ✓ `0x33bcc1c8` | 125,251 | 116,211 | +9,040 | **0** (0.00%) | 0 | under the floor | 3 (1C/1S/1L2) |  |
+| Centrifuge | [`0x2a87769b…`](https://etherscan.io/tx/0x2a87769b97e35faa71c4743742f0f4cb1fedefe523939a480ff64cd8d1454c64) | Hub `updateRestriction` ✓ `0x33bcc1c8` | 112,968 | 103,928 | +9,040 | **0** (0.00%) | 0 | under the floor | 3 (1C/1S/1L2) |  |
 
 ## Transactions that could not be measured at all
 
@@ -1217,13 +1234,18 @@ The tool produced no output and exited cleanly. Every one is a very large trace,
 | EigenLayer | [`0x6508d5bf…`](https://etherscan.io/tx/0x6508d5bfc34439a4005d3c0e8967fe62cf65df140eae5171cb9faa35b8ccc4ac) | checkpoint proof, ~3.4M gas, 85 KB calldata |
 | EigenLayer | [`0xe92e3dad…`](https://etherscan.io/tx/0xe92e3dadee2f12722936bb8fc0bf19527e305e4c51a6e63e9f10d481d067e23d) | checkpoint proof, oversized trace |
 | Sky | [`0x2f6a9995…`](https://etherscan.io/tx/0x2f6a99957e3f04443c6fb474108c0e26a026bd162317ca2964a48e2fc981c7be) | sUSDS `deposit`, 110,061 gas, 0 logs; replay failed 6 attempts |
+| Centrifuge | [`0x0d6d8fe6…`](https://etherscan.io/tx/0x0d6d8fe6b1661549e843bda1fad0b431e4a208c825d24696bea7b748dbf27db5) | Hub `multicall`, 131,622 gas; replay reverts `NotManager()` (`0xc0fc8a8a`) |
+| Centrifuge | [`0xe918bd9f…`](https://etherscan.io/tx/0xe918bd9fec54b88f58525b5662246e57e081c8f8aa94ec35985991ba7e4cb036) | Hub `multicall`, 883,816 gas; replay reverts `NotManager()` |
+| Centrifuge | [`0x338688a1…`](https://etherscan.io/tx/0x338688a155a5c48cd2ebbffd25b0088f26bcf8f8a4cbe41ba8e258e856c646b0) | Hub `multicall`, 1,842,769 gas; replay reverts `NotManager()` |
+| Centrifuge | [`0x81dcf346…`](https://etherscan.io/tx/0x81dcf3462864909275012719f63080d2a2f4f9bf6e76924a6c8e67060e362e3d) | VaultRouter `multicall`, 353,308 gas; RPC 50/second limit while replaying preceding txs, 10 attempts |
+| Centrifuge | [`0xa5b90e8b…`](https://etherscan.io/tx/0xa5b90e8bb47ceec5fb55a32ef552c63c81f425f0f80d4b485697e4169575379c) | VaultRouter `multicall`, 454,309 gas; same RPC rate limit, 10 attempts |
 
 Four Morpho liquidations failed the real replay for other reasons and appear in the table above with `heur` numbers you should not trust: one sender is an EIP-7702 smart EOA the simulator rejects outright, two revert reproducibly part-way through the replay, and one was rate-limited. `MORPHO_CANDIDATES.md` has the detail.
 
 ## What to be careful about
 
 - **15 of the results are `heur` fallbacks** (Morpho 7, Euler 3, Ethena 3, Railgun 2). Ignore their savings figures. The three biggest apparent Morpho wins in this file (16.32%, 13.47%, 11.25% — quoted at the old floor) are all fallbacks. **The heuristic estimator itself was also fixed upstream (`271cd74`), so these rows are stale for two independent reasons and must be re-run on the rebuilt binary before use.** Of the 18 fallbacks re-measured properly so far, **16 collapsed to 0%** (6 in Ethena, 4 corrected in place across Morpho/Aave/Ether.fi, all 8 in ENS). The two exceptions are both Pyth, where a real saving survived but shrank — `0x8874d5a5…` from 65.79% to 49.76%, and `0x616ba1cd…` down to 63.94% (41.53% and 52.06% respectively at the 50,000 floor). So a fallback is not automatically fictional; it is automatically *overstated*, and on this evidence it is fictional about 90% of the time.
-- **The five unmeasurable transactions are all large.** EigenLayer's real ceiling is unknown for this reason.
+- **Most unmeasurable transactions are large.** EigenLayer's real ceiling is unknown for this reason. The exceptions are Sky's 110,061-gas `deposit` and Centrifuge's 131,622-gas `multicall`, which fail for reasons unrelated to size.
 - **Two Ondo rows are mislabelled traffic**, flagged in the notes column — an MEV bot and an aggregator that happen to touch Ondo tokens. Ondo's own mint and redeem transactions save 1–2%.
 - **A `heur` row with zero external calls is still not trustworthy.** ENS produced four such rows and the biggest was wrong by 125,611 gas. The fallback underprices fresh storage writes as well as calls.
 - **ENS is fully measured (18/18) and uniformly zero.** It is the one protocol here where the negative result is structural rather than a sampling artefact.

@@ -1628,6 +1628,83 @@ hashing locally; all ten resolved, including
 `addLiquidityUniswapV3(address,uint256,(int24,int24),(uint256,uint256),(uint256,uint256),uint256)`,
 whose struct parameters have to be expanded to tuples before the hash matches.
 
+## Centrifuge — a real directly-called surface, and a fixed 9,000-gas dispatch cost
+
+Centrifuge V3 was the strongest prior of anything measured recently: unlike Grove it has a
+large **directly-called** surface, it runs the biggest median transaction in this survey, and
+Grove's own programs are full of Centrifuge vault calls. **5 measured, 0 saving**, and 5 more
+that could not be measured at all.
+
+**Found through Grove, not by search.** Grove's recorded programs contain
+`claimRedeemERC7540(address)` calldata, and the address in it is a Centrifuge ERC-7540 vault:
+`0xfe6920eb…` (`asset()` = USDC, `share()` = **JTRSY, "Janus Henderson Treasury Fund"**). From
+the vault, `manager()` and `root()` gave the rest of the deployment. A useful byproduct: the two
+`0xbeeff0…` addresses in Grove's `depositERC4626` calls are **not** Centrifuge — they are
+MetaMorpho vaults named "Grove x Steakhouse USDC" and "Grove x Steakhouse AUSD".
+
+| | |
+|---|---|
+| Hub | `0xa4a7bb38…64341953` (23,979 B) — Etherscan "Centrifuge: Hub" |
+| Request manager | `0xf48256ab…1f9761ae` (24,569 B) |
+| JTRSY vault (ERC-7540) | `0xfe6920eb…cdbdfd77a` |
+| JTRSY share token | `0x8c213ee7…418c4b86` |
+| Root | `0x7ed48c31…2b688368f` |
+
+**Volume, 200,000 blocks (27.8 days):** 405 transactions touch Centrifuge (14.58/day), and
+**321 are direct top-level calls to the Hub** — no multisig in the way, unlike Grove.
+
+| entry point | selector | n | median gas |
+|---|---|---:|---:|
+| Hub `multicall` | `0xac9650d8` | 248 | 1,842,769 |
+| Hub `updateRestriction` | `0x33bcc1c8` | 68 | 120,969 |
+| Hub *unidentified* | `0xf3046c8e` | 4 | 743,965 |
+| Hub `notifyAssetPrice` | `0xbb3f476f` | 1 | 100,191 |
+| VaultRouter `multicall` | `0xac9650d8` | 13 | 454,309 |
+
+Selectors were resolved by pulling the Hub's function list from `centrifuge/protocol` and
+hashing locally with the custom types expanded (`PoolId`=uint64, `ShareClassId`=bytes16,
+`AssetId`=uint128). `0xf3046c8e` did not match any candidate expansion and is left unidentified
+rather than guessed.
+
+**The result is a constant, not a percentage.**
+
+| tx | function | gas | base | surplus |
+|---|---|---:|---:|---:|
+| `0xf87748e4…` | `updateRestriction` | 779,739 | 770,783 | 8,956 |
+| `0xe3773583…` | `0xf3046c8e` | 664,013 | 654,404 | 9,609 |
+| `0x91e3f815…` | `updateRestriction` | 657,820 | 648,864 | 8,956 |
+| `0x9fb032dd…` | `updateRestriction` | 125,251 | 116,211 | 9,040 |
+| `0x2a87769b…` | `updateRestriction` | 112,968 | 103,928 | 9,040 |
+
+Surplus stays between 8,956 and 9,609 while gas varies **7x**, and across two different
+functions. The Hub's own work is a fixed ~9,000 gas of dispatch; everything else sits inside
+`CALL`s that are replayed verbatim. This is a stronger negative than a spread of small
+percentages would be, because it forecloses the obvious rescue: there is no larger Centrifuge
+transaction that would clear the floor, since the 779,739-gas row has the *same* surplus as the
+112,968-gas one.
+
+An early read of the trace suggested ~40% of the small `updateRestriction` was the Hub's own
+work. That was wrong — measurement put it at ~8%, and the part attributed to the Hub was inside
+the restriction hook.
+
+**Five transactions could not be measured, for two different reasons.** All five are
+`multicall`, which initially looked like a property of the call shape; it is not one cause but
+two. The three Hub multicalls fail deterministically: each records as a *single* `Call` carrying
+the whole batch, and replay trips `NotManager()` (`0xc0fc8a8a`) because the callee is re-entered
+without the Hub's context — a **caller-context** variant of the replay defect, distinct from the
+lost-intermediate-state form seen in Morpho and Euler. The two VaultRouter multicalls failed on
+the RPC provider's 50/second limit across 10 attempts each, which is infrastructure, not a
+defect.
+
+That gap matters for the verdict: the unmeasured `multicall` rows are **248 of Centrifuge's 321
+direct Hub calls**, so the 0.00% here is established for `updateRestriction` and the small
+`0xf3046c8e` family, not for the protocol's dominant transaction type. The heuristic put those
+multicalls at 126,200 / 878,466 / 1,836,144 against 131,622 / 883,816 / 1,842,769 gas used —
+surpluses of 5,422, 5,350 and 6,625, the same order as the measured ~9,000 and nowhere near the
+floor. That is consistent with the measured rows but is not evidence, and none of it is quoted.
+
+**Worth $0/month.** These transactions paid a median 0.129 gwei.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is
