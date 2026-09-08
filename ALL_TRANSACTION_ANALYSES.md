@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-374 Ethereum mainnet transactions across 37 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
+384 Ethereum mainnet transactions across 38 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -163,6 +163,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Frax** | 10 | 0 | **0.00%** | — | replay costs more (10); router rows are **call-blocked**, not empty — see `CALL_BLOCKED_CANDIDATES.md` |
 | **Grove** | 10 | 0 | **0.00%** | — | under the floor (9), replay costs more (1); **no directly-callable surface** — 96 of 97 transactions enter through the operator Safe |
 | **Centrifuge** | 5 | 0 | **0.00%** | — | under the floor (5); the Hub's own work is a fixed ~9,000 gas — **5 more `multicall` rows could not be measured**, 3 a replay defect and 2 rate-limited |
+| **Maple** | 10 | 0 | **0.00%** | — | replay costs more (8), under the floor (2); the two `transfer` rows **miss the floor by under 1,800 gas** and are not call-blocked |
 
 ## ENS: 18 transactions, 18 measured, nothing saved
 
@@ -681,10 +682,12 @@ Avoid protocols whose transactions are mostly transfers, share-balance updates, 
 
 ## Near misses — blocked by calls but already close
 
-These transactions have real compressible work left over and still lost. If the contract behind the call also ran GasKiller, these are the ones that flip first. **Shortfalls are against the 50,000-gas floor** — at the old 27,000 floor they were 23,000 gas smaller, and several of these rows were wins.
+These transactions have real compressible work left over and still lost. If the contract behind the call also ran GasKiller, these are the ones that flip first. **The two Maple rows are a different case: they have no calls at all.** Nothing is hidden from the encoder — the pool token's transfer simply does 48,000 gas of removable work when the floor asks for 50,000, so no upstream integration would rescue them. **Shortfalls are against the 50,000-gas floor** — at the old 27,000 floor they were 23,000 gas smaller, and several of these rows were wins.
 
 | protocol | tx | function | gas used | surplus | short of the floor by | calls in the result |
 |---|---|---|---:|---:|---:|---:|
+| Maple | [`0x12007073…`](https://etherscan.io/tx/0x120070735fe7bda85a35d96c581cd2f78e40b800f1e209b984b1ab5007d8f34e) | syrupUSDC `transfer` ✓ `0xa9059cbb` | 106,124 | +48,316 | **1,684** | **0** |
+| Maple | [`0x4d261f84…`](https://etherscan.io/tx/0x4d261f847797252c35cf26a72e36cdd61be3da431d0ca9b53e27944e114be669) | syrupUSDC `transfer` ✓ `0xa9059cbb` | 110,936 | +48,232 | **1,768** | **0** |
 | Morpho | [`0x1c71eb76…`](https://etherscan.io/tx/0x1c71eb76549cc6a80467e06e8bc938b7fc1e67e9575c2aece8d98345243bb218) | *9-market reallocation* `0xeb7499cf` | 725,295 | +25,527 | 24,473 | 1 |
 | Safe | [`0x5688590b…`](https://etherscan.io/tx/0x5688590bc26e704d720d7bb2185b195aabb310ba67dddd944f64509b1cf70513) | `execTransaction` ✓ `0x6a761202` | 322,338 | +25,210 | 24,790 | 2 |
 | Pendle | [`0xa2c6de73…`](https://etherscan.io/tx/0xa2c6de73e89c7bd707a9fe308d09c54eb16d2ddf9e3ff09f866d8a68e3948afd) | *third-party aggregator* `0xc685f647` | 1,183,159 | +25,192 | 24,808 | 5 |
@@ -1221,6 +1224,16 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Centrifuge | [`0xe3773583…`](https://etherscan.io/tx/0xe3773583af72489947f1d84def8a0d9461aa341609f33d7150d9bc48742102c7) | Hub *unidentified* `0xf3046c8e` | 664,013 | 654,404 | +9,609 | **0** (0.00%) | 0 | under the floor | 4 (2C/1S/1L2) | different function, same ~9,600 surplus |
 | Centrifuge | [`0x9fb032dd…`](https://etherscan.io/tx/0x9fb032ddcdb504db55664e85ef50bcb0992a7d96c5730a67770556d409055941) | Hub `updateRestriction` ✓ `0x33bcc1c8` | 125,251 | 116,211 | +9,040 | **0** (0.00%) | 0 | under the floor | 3 (1C/1S/1L2) |  |
 | Centrifuge | [`0x2a87769b…`](https://etherscan.io/tx/0x2a87769b97e35faa71c4743742f0f4cb1fedefe523939a480ff64cd8d1454c64) | Hub `updateRestriction` ✓ `0x33bcc1c8` | 112,968 | 103,928 | +9,040 | **0** (0.00%) | 0 | under the floor | 3 (1C/1S/1L2) |  |
+| Maple | [`0xf051d656…`](https://etherscan.io/tx/0xf051d6565d609f378396a1e65320c1a3ebdae60480bc2a5957899f69f5812bcc) | syrupUSDC `requestRedeem` ✓ `0x107703ab` | 335,952 | 349,301 | -13,349 | **0** (0.00%) | 0 | replay costs more | 7 (1C/4S/1L2/1L3) | pure bookkeeping — queues a withdrawal request, nothing to remove |
+| Maple | [`0xc483ac7f…`](https://etherscan.io/tx/0xc483ac7f5263d92bafc3a1bd4bab78c096a88d56b6a56fd8e199a72594a5b80e) | syrupUSDT `requestRedeem` ✓ `0x107703ab` | 335,952 | 349,313 | -13,361 | **0** (0.00%) | 0 | replay costs more | 7 (1C/4S/1L2/1L3) | identical 11,660-byte pool code to syrupUSDC, identical result |
+| Maple | [`0x21535389…`](https://etherscan.io/tx/0x2153538963fcc3b8611554bb21e8bbe790df17145a7f200beb39501c63d8f13c) | syrupUSDC `requestRedeem` ✓ `0x107703ab` | 331,164 | 344,513 | -13,349 | **0** (0.00%) | 0 | replay costs more | 7 (1C/4S/1L2/1L3) |  |
+| Maple | [`0xc06e14e9…`](https://etherscan.io/tx/0xc06e14e974e33fe626196f294579430338494a6d49f8c5eb32203c1966935291) | syrupUSDT `requestRedeem` ✓ `0x107703ab` | 331,152 | 344,453 | -13,301 | **0** (0.00%) | 0 | replay costs more | 7 (1C/4S/1L2/1L3) |  |
+| Maple | [`0xd89dfcf5…`](https://etherscan.io/tx/0xd89dfcf51ac4924f38e0e7d796f95c2db74a4227f8baaa1622ac3f362e46dc8a) | syrupUSDC `requestRedeem` ✓ `0x107703ab` | 296,952 | 310,253 | -13,301 | **0** (0.00%) | 0 | replay costs more | 7 (1C/4S/1L2/1L3) |  |
+| Maple | [`0x8a60e71e…`](https://etherscan.io/tx/0x8a60e71e455fddae16816c167abcdaaecdf22ba42d18a66e168c626039aeda29) | syrupUSDC `requestRedeem` ✓ `0x107703ab` | 287,536 | 300,801 | -13,265 | **0** (0.00%) | 0 | replay costs more | 7 (1C/4S/1L2/1L3) | 48,416 gas smaller than the largest row, deficit differs by 96 |
+| Maple | [`0x37116f24…`](https://etherscan.io/tx/0x37116f2434567d0da30030d33e2263d7d203d95d4736ca947f559a262c3744d3) | syrupUSDC `removeShares` ✓ `0x1b8f1830` | 163,625 | 171,119 | -7,494 | **0** (0.00%) | 0 | replay costs more | 4 (1C/2S/1L2) | different function, same negative result |
+| Maple | [`0x4d261f84…`](https://etherscan.io/tx/0x4d261f847797252c35cf26a72e36cdd61be3da431d0ca9b53e27944e114be669) | syrupUSDC `transfer` ✓ `0xa9059cbb` | 110,936 | 62,704 | +48,232 | **0** (0.00%) | 0 | under the floor | 3 (2S/1L3) | **near miss, 1,768 short** — no calls, receipt log count matches the program exactly |
+| Maple | [`0x12007073…`](https://etherscan.io/tx/0x120070735fe7bda85a35d96c581cd2f78e40b800f1e209b984b1ab5007d8f34e) | syrupUSDC `transfer` ✓ `0xa9059cbb` | 106,124 | 57,808 | +48,316 | **0** (0.00%) | 0 | under the floor | 3 (2S/1L3) | **near miss, 1,684 short** — base is 54% of gas, all of it real removable work |
+| Maple | [`0xff1716df…`](https://etherscan.io/tx/0xff1716df9e01e61d0e8e677264f9f3f32d2d001cf9b399c7e652f94626396ad8) | SYRUP `transfer` ✓ `0xa9059cbb` | 56,552 | 62,860 | -6,308 | **0** (0.00%) | 0 | replay costs more | 3 (2S/1L3) | the plain governance token — same program shape, but nothing to compute |
 
 ## Transactions that could not be measured at all
 

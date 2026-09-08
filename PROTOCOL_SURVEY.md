@@ -1705,6 +1705,73 @@ floor. That is consistent with the measured rows but is not evidence, and none o
 
 **Worth $0/month.** These transactions paid a median 0.129 gwei.
 
+## Maple — the closest miss in the survey, and it is not call-blocked
+
+Maple (Syrup) is the highest-volume protocol measured since Aave: **22,697 transactions in 27.8
+days, 817/day**, touching syrupUSDC, syrupUSDT and the SYRUP token. **10 measured, 0 saving** —
+but two rows miss the floor by under 1,800 gas, and unlike every previous near miss they are not
+blocked by anything.
+
+All three token contracts were verified on-chain before any volume claim: `syrupUSDC`
+`0x80ac24aA…90f5Cc0b` and `syrupUSDT` `0x356B8d89…74d5BA7D` (both 11,660 B, both exposing
+`asset()` and `manager()`), and `SYRUP` `0x643C4E15…3Ef52d66`.
+
+**Where the volume actually is.** Most of the 817/day is SYRUP token traffic. Sampling 450 of the
+22,697 transactions, the pool-direct calls are:
+
+| pool | selector | function | n | median gas |
+|---|---|---|---:|---:|
+| syrupUSDC | `0x107703ab` | `requestRedeem(uint256,address)` | 16 | 331,146 |
+| syrupUSDT | `0x107703ab` | `requestRedeem(uint256,address)` | 7 | 331,152 |
+| syrupUSDC | `0x1b8f1830` | `removeShares(uint256,address)` | 1 | 163,625 |
+
+Scaled, `requestRedeem` runs about **42/day at 331,152 gas** — called directly on the pool token,
+no router and no multisig. It was the most promising-looking target in weeks.
+
+**`requestRedeem` is pure bookkeeping.** All six measured instances have *negative* surplus: the
+recorded state changes cost ~13,300 gas **more** to replay than the original transaction cost to
+execute.
+
+| gas used | base | surplus |
+|---:|---:|---:|
+| 335,952 | 349,313 | -13,361 |
+| 335,952 | 349,301 | -13,349 |
+| 331,164 | 344,513 | -13,349 |
+| 331,152 | 344,453 | -13,301 |
+| 296,952 | 310,253 | -13,301 |
+| 287,536 | 300,801 | -13,265 |
+
+A 48,416-gas spread between smallest and largest moves the deficit by 96 gas. The function writes
+a withdrawal request to storage and does essentially nothing else; there is no computation to
+remove, and `removeShares` (-7,494) behaves the same way.
+
+**The pool token's `transfer` is the interesting row.**
+
+| tx | gas used | base | surplus | short of floor |
+|---|---:|---:|---:|---:|
+| `0x12007073…` | 106,124 | 57,808 | **+48,316** | **1,684** |
+| `0x4d261f84…` | 110,936 | 62,704 | **+48,232** | **1,768** |
+
+Base is 54% of gas used. The recorded program is `2 Store + 1 Log3`, **no calls at all**, and the
+receipt carries exactly 1 log — so the program is a complete account of the transaction and the
+48,000 gas is genuinely removable. A Syrup pool token transfer is not a plain ERC-20 move: it
+runs permission checks and share accounting on every transfer. The control in the same batch
+settles it — the plain SYRUP governance token, same `2S/1L3` program shape, measures **-6,308**.
+
+**But it cannot be rescued.** Scanning 120,000 blocks for every direct `transfer()` on both pools
+found 64 of them (53 syrupUSDC, 11 syrupUSDT) and the **maximum is 110,936 gas** — which is the
+110,936 row above, and its surplus is *smaller* than the 106,124 row's. The surplus is pinned near
+48,300 and does not scale with transaction size, so there is no larger Maple transfer that clears
+50,000. At 3.84 direct transfers/day it would be worth very little even if it did.
+
+This is the first entry in the near-miss table that is **not call-blocked**. Every other row there
+loses work to a `CALL` the encoder cannot see, so an upstream integration would flip it. Here
+nothing is hidden: the work is fully visible, fully measured, and 1,684 gas too small. It is the
+cleanest demonstration in this survey that the 50,000 floor, not the encoder, is what decides
+marginal cases — the same transaction was a win at the old 27,000 floor.
+
+**Worth $0/month.** These transactions paid a median 0.316 gwei.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is
