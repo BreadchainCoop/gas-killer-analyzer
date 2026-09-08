@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-368 Ethereum mainnet transactions across 36 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
+369 Ethereum mainnet transactions across 36 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Six more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -161,7 +161,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Snapshot** | 2 | 0 | **0.00%** | — | replay costs more (2); delegation record only, voting is off-chain |
 | **delegate.xyz** | 3 | 0 | **0.00%** | — | replay costs more (3); found while separating it from Snapshot |
 | **Frax** | 10 | 0 | **0.00%** | — | replay costs more (10); router rows are **call-blocked**, not empty — see `CALL_BLOCKED_CANDIDATES.md` |
-| **Grove** | 9 | 0 | **0.00%** | — | under the floor (8), replay costs more (1); **no directly-callable surface** — 96 of 97 transactions enter through the operator Safe |
+| **Grove** | 10 | 0 | **0.00%** | — | under the floor (9), replay costs more (1); **no directly-callable surface** — 96 of 97 transactions enter through the operator Safe |
 
 ## ENS: 18 transactions, 18 measured, nothing saved
 
@@ -1202,6 +1202,7 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Grove | [`0x8c88ef09…`](https://etherscan.io/tx/0x8c88ef09112f2d9f7d112723db516eda02056ace934eb751957500b914c6d600) | Safe `execTransaction` ✓ `0x6a761202` | 583,854 | 565,937 | +17,917 | **0** (0.00%) | 0 | under the floor | 4 (2C/1S/1L2) | replays `withdrawERC4626`, `swapUniswapV3` whole — 18 receipt logs, 1 recorded |
 | Grove | [`0xff9475b4…`](https://etherscan.io/tx/0xff9475b4238dedeb59124201f1772a396fae59ea4ed342c907c69f0af0c4ef7e) | Safe `execTransaction` ✓ `0x6a761202` | 542,909 | 530,945 | +11,964 | **0** (0.00%) | 0 | under the floor | 5 (3C/1S/1L2) | replays `mintUSDS`, `swapUSDSToUSDC`, `transferAsset` whole — 26 receipt logs, 1 recorded |
 | Grove | [`0x65276f18…`](https://etherscan.io/tx/0x65276f188f1dc7af9e60f582f87aa09ab34d40556182355c9a4134b3310ac653) | Safe `execTransaction` ✓ `0x6a761202` | 502,204 | 487,940 | +14,264 | **0** (0.00%) | 0 | under the floor | 4 (2C/1S/1L2) | replays `swapUSDCToUSDS`, `burnUSDS` whole — 25 receipt logs, 1 recorded |
+| Grove | [`0x402d3aeb…`](https://etherscan.io/tx/0x402d3aeb8049f2ac33ffbda112e6a16ad9babd4cf1e44d2c10d835d71882dbc1) | Safe `execTransaction` ✓ `0x6a761202` | 146,292 | 125,513 | +20,779 | **0** (0.00%) | 0 | under the floor | 3 (1C/1S/1L2) | replays `transferAsset` whole — 3 receipt logs, 1 recorded |
 | Grove | [`0x3b2f94ca…`](https://etherscan.io/tx/0x3b2f94ca433264748a3534dc3357f0f91015c451008c4521fea21192210e9d4c) | Safe `execTransaction` ✓ `0x6a761202` | 124,428 | 103,637 | +20,791 | **0** (0.00%) | 0 | under the floor | 3 (1C/1S/1L2) | replays `transferAsset` whole — 3 receipt logs, 1 recorded |
 
 ## Transactions that could not be measured at all

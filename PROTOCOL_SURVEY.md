@@ -1555,7 +1555,7 @@ Two selectors could not be identified and are labelled unidentified rather than 
 
 Grove is a Sky ecosystem "Star" running the Grove Liquidity Layer (GLL), a fork of
 `spark-alm-controller`. It allocates USDS-denominated capital into tokenised credit and
-ERC-7540 funds. **9 measured, 0 saving.** The reason is structural and worth stating precisely,
+ERC-7540 funds. **10 measured, 0 saving.** The reason is structural and worth stating precisely,
 because it is the mirror image of the Aragon result.
 
 **Finding it without guessing.** Two rounds of web search returned three wrong addresses,
@@ -1610,6 +1610,7 @@ the best row here would be 1.7%.
 | 583,854 | 565,937 | +17,917 | 2C/1S/1L2 | 18 | `withdrawERC4626`, `swapUniswapV3` |
 | 542,909 | 530,945 | +11,964 | 3C/1S/1L2 | 26 | `mintUSDS`, `swapUSDSToUSDC`, `transferAsset` |
 | 502,204 | 487,940 | +14,264 | 2C/1S/1L2 | 25 | `swapUSDCToUSDS`, `burnUSDS` |
+| 146,292 | 125,513 | +20,779 | 1C/1S/1L2 | 3 | `transferAsset` |
 | 124,428 | 103,637 | +20,791 | 1C/1S/1L2 | 3 | `transferAsset` |
 
 **The mirror image of Aragon.** Both are call-dominated — the recorded program is a handful of
