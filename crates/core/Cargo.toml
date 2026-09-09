@@ -3,6 +3,9 @@ name = "gas-analyzer-core"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+sp1-cc = ["dep:sp1-cc-client-executor"]
+
 [dependencies]
 alloy-primitives = "1.0.37"
 alloy-sol-types = "1.0.37"
@@ -12,3 +15,4 @@ serde_json = "1.0"
 hex = "0.4"
 anyhow = "1.0.98"
 tracing = "0.1"
+sp1-cc-client-executor = { git = "https://github.com/BreadchainCoop/sp1-contract-call", rev = "1f04b99f89df07a54e5c1f7e3b816dff75803850", package = "sp1-cc-client-executor", optional = true }

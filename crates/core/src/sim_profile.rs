@@ -118,6 +118,29 @@ impl SimProfile {
     }
 }
 
+/// The sp1-contract-call environment overrides this profile executes under.
+///
+/// Available with the `sp1-cc` feature. This is the only supported way to turn
+/// a [`SimProfile`] into `EnvOverrides`: every party that re-executes a
+/// tracked function — operators, this analyzer, the SP1 slashing guest — must
+/// use bit-identical limits, and a hand-written `EnvOverrides::gas_limits(..)`
+/// at each call site is how they drift apart. Restating the constants also
+/// silently collapses the block and transaction limits into one, which is
+/// correct only for as long as they happen to be equal.
+///
+/// The guest binds the active overrides into `chainConfigHash`, so a proof
+/// produced under limits other than these cannot satisfy a verifier expecting
+/// this profile.
+#[cfg(feature = "sp1-cc")]
+impl From<SimProfile> for sp1_cc_client_executor::EnvOverrides {
+    fn from(profile: SimProfile) -> Self {
+        Self {
+            block_gas_limit: profile.block_gas_limit_override(),
+            tx_gas_limit: profile.tx_gas_limit_override(),
+        }
+    }
+}
+
 /// Ceiling on the on-chain cost of an extracted payload under the `Unbounded` profile: EIP-7825's
 /// per-transaction gas cap, `2^24`.
 ///
@@ -469,6 +492,29 @@ mod tests {
         assert_eq!(UNBOUNDED_TX_GAS_LIMIT, 1 << 40);
         // EIP-7825's per-transaction cap — the ceiling a payload must fit under.
         assert_eq!(UNBOUNDED_PAYLOAD_GAS_BUDGET, 1 << 24);
+    }
+
+    /// The conversion must carry both limits separately and leave `Chain`
+    /// untouched, so a `Chain` execution still resolves to the header and
+    /// hashes to the pre-override `chainConfigHash`.
+    #[cfg(feature = "sp1-cc")]
+    #[test]
+    fn env_overrides_carry_the_profile_limits() {
+        use sp1_cc_client_executor::EnvOverrides;
+
+        let chain: EnvOverrides = SimProfile::Chain.into();
+        assert!(chain.is_unset(), "Chain must not override anything");
+
+        let unbounded: EnvOverrides = SimProfile::Unbounded.into();
+        assert_eq!(unbounded.block_gas_limit, Some(UNBOUNDED_BLOCK_GAS_LIMIT));
+        assert_eq!(unbounded.tx_gas_limit, Some(UNBOUNDED_TX_GAS_LIMIT));
+
+        // What the EVM and the chainConfigHash both end up using. Pinned
+        // against a realistic header limit so a future divergence between the
+        // two constants shows up here rather than in a failing proof.
+        let resolved = unbounded.resolve(30_000_000);
+        assert_eq!(resolved.block, UNBOUNDED_BLOCK_GAS_LIMIT);
+        assert_eq!(resolved.tx, UNBOUNDED_TX_GAS_LIMIT);
     }
 
     #[test]

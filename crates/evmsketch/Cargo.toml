@@ -19,8 +19,8 @@ gas-analyzer-estimator = { path = "../gas-estimator" }
 gas-analyzer-rpc = { path = "../rpc" }
 reth-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 revm = { version = "31.0.1" }
-sp1-cc-client-executor = { git = "https://github.com/BreadchainCoop/sp1-contract-call", branch = "cancun-v1", package = "sp1-cc-client-executor" }
-sp1-cc-host-executor = { git = "https://github.com/BreadchainCoop/sp1-contract-call", branch = "cancun-v1", package = "sp1-cc-host-executor" }
+sp1-cc-client-executor = { git = "https://github.com/BreadchainCoop/sp1-contract-call", rev = "1f04b99f89df07a54e5c1f7e3b816dff75803850", package = "sp1-cc-client-executor" }
+sp1-cc-host-executor = { git = "https://github.com/BreadchainCoop/sp1-contract-call", rev = "1f04b99f89df07a54e5c1f7e3b816dff75803850", package = "sp1-cc-host-executor" }
 lru = "0.13"
 tokio = { version = "1", features = ["rt"] }
 tracing = "0.1"

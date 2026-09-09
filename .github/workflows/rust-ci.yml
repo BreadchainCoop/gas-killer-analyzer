@@ -44,6 +44,7 @@ jobs:
       - name: cargo clippy (feature matrix)
         run: |
           cargo hack clippy \
+            -p gas-analyzer-core \
             -p gas-analyzer-evmsketch \
             -p gas-analyzer-cli \
             --each-feature --exclude-no-default-features \
@@ -77,6 +78,12 @@ jobs:
       - name: cargo test --ignored (evmsketch RPC)
         if: env.RPC_URL != ''
         run: cargo test -- --ignored
+
+      # `gas-analyzer-core`'s `sp1-cc` feature is off by default, so the plain
+      # `cargo test` above never builds the SimProfile -> EnvOverrides
+      # conversion or the test that pins it.
+      - name: cargo test (core, sp1-cc feature)
+        run: cargo test -p gas-analyzer-core --features sp1-cc
 
       - name: cargo test (anvil)
         run: cargo test -p gas-analyzer-anvil -p gas-analyzer-cli --features gas-analyzer-cli/anvil --no-default-features
