@@ -3818,6 +3818,7 @@ dependencies = [
  "hex",
  "serde",
  "serde_json",
+ "sp1-cc-client-executor",
  "tracing",
 ]
 
