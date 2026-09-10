@@ -21,8 +21,10 @@
 > Two other upstream fixes are now in the binary and are *not* yet reflected in the `heur` rows:
 > `271cd74` corrected the heuristic's flat 5,000 SSTORE charge to real per-write pricing and added
 > a calldata term — the exact defect diagnosed independently in the ENS section below — and
-> `febc11d` flags re-entrant callbacks instead of silently mispricing them. The 15 `heur` rows
-> were produced by the *old* heuristic and are doubly stale.
+> `febc11d` flags re-entrant callbacks instead of silently mispricing them. 11 `heur` rows remain
+> and were produced by the *old* heuristic. Four were re-measured on 2026-09-10 and are now real:
+> in every one the heuristic had **understated** base (by 20,583 to 240,640 gas), so every corrected
+> row moved further negative. None changed a scoreboard figure.
 
 **Read the dollar-value section first.** The percentages in this file are large and the money behind them is not: the whole opportunity across the three best protocols is roughly $2,600 a month at the gas prices measured.
 
@@ -51,7 +53,7 @@ Across all 208 transactions, **68 show a saving** and 140 show none.
 
 Of the 68 savings, **66 are properly measured and 2 are suspect** — the two ERC-4337
 EntryPoint rows at 80.66% and 86.54%, which are probably artifacts of the replay defect
-described below. **15 rows are still tagged `heur`** and are not results; re-run them
+described below. **11 rows are still tagged `heur`** and are not results; re-run them
 serially before using them.
 
 Of the 140 that save nothing:
@@ -375,7 +377,7 @@ Chainlink, Panther, Umbra and Sky score zero at *any* floor, including zero — 
 negative, so replaying costs more than the original transaction regardless of signature
 scheme. Umbra is the starkest: all 8 of its transactions are negative, best case −7,488 gas.
 
-Caveats: the 15 `heur` rows are excluded, since their base estimates are unreliable for
+Caveats: the 11 remaining `heur` rows are excluded, since their base estimates are unreliable for
 reasons unrelated to the floor. The 5 unmeasurable transactions have no base estimate at all
 and cannot be re-evaluated at any floor. The BLS row uses the same mechanism with its 250,000
 constant, which has the same lack of provenance.
@@ -982,7 +984,7 @@ A **✓** on a function name means I confirmed the 4-byte selector by hashing th
 | Euler | [`0x575f2fb2…`](https://etherscan.io/tx/0x575f2fb2224cf67a0a3a8cca18def46bbf327eb72e1ac1414771dffd6f4a67f3) `heur` | *third-party contract* `0x1d23a9c4` | 3,036,470 | 3,319,285 | -282,815 | **0** (0.00%) | 0 | replay costs more | 4 (4C) |  |
 | Euler | [`0x1fd83b06…`](https://etherscan.io/tx/0x1fd83b06274079376b85f63220bbfb16cdfe1279ad5b8d07bd613a68b7639ca3) `heur` | *third-party contract* `0x1d23a9c4` | 2,715,594 | 3,069,384 | -353,790 | **0** (0.00%) | 0 | replay costs more | 4 (4C) |  |
 | Euler | [`0x7d1e2345…`](https://etherscan.io/tx/0x7d1e2345c39b884a16eb6b2e06c1c4a4177c5639fe1c91474a356c3eef04fd87) | *third-party contract* `0x3271ba8d` | 2,701,108 | 2,683,478 | +17,630 | **0** (0.00%) | 0 | under the floor | 7 (3C/3S/1L2) |  |
-| Euler | [`0xf6e16544…`](https://etherscan.io/tx/0xf6e16544c8c04199f8318649d05ab68f3ddd4ea2c1f7dee9cab98a0301afd0ad) `heur` | `batch` ✓ `0xc16ae7a4` | 1,531,193 | 1,608,623 | -77,430 | **0** (0.00%) | 0 | replay costs more | 152 (80S/33C/31L4/6L3/2L2) |  |
+| Euler | [`0xf6e16544…`](https://etherscan.io/tx/0xf6e16544c8c04199f8318649d05ab68f3ddd4ea2c1f7dee9cab98a0301afd0ad) | `batch` ✓ `0xc16ae7a4` | 1,531,193 | 1,849,263 | -318,070 | **0** (0.00%) | 0 | replay costs more | 152 (80S/33C/31L4/6L3/2L2) | **re-measured** — the old `heur` base was 1,608,623, understated by 240,640 |
 | Euler | [`0xc3543837…`](https://etherscan.io/tx/0xc3543837e22a84fb06798cb626d7a1cc716329fdf15fb675eafc587911090206) | `batch` ✓ `0xc16ae7a4` | 1,415,274 | 1,871,874 | -456,600 | **0** (0.00%) | 0 | replay costs more | 158 (82S/37C/35L4/2L2/2L3) | worst result measured anywhere |
 | Euler | [`0xa32effd3…`](https://etherscan.io/tx/0xa32effd3b31a02343d8cf4362c4fee2e806ea9dcf00fdea5eb1a2b054ae0ea4a) | `batch` ✓ `0xc16ae7a4` | 499,524 | 482,833 | +16,691 | **0** (0.00%) | 0 | under the floor | 29 (16S/5C/3L3/3L4/2L2) |  |
 | Euler | [`0x10c755ee…`](https://etherscan.io/tx/0x10c755eea1865f9761e49f2e52dd700d8ecc4e0037057bb2ea05df24bb946095) | `batch` ✓ `0xc16ae7a4` | 203,620 | 244,538 | -40,918 | **0** (0.00%) | 0 | replay costs more | 14 (8S/3C/2L4/1L2) |  |
@@ -1018,9 +1020,9 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Ethena | [`0xd6e74eef…`](https://etherscan.io/tx/0xd6e74eef135030ef66c96c65247c0595d81d8de790923139eabe419800752aba) | `cooldownShares` ✓ `0x9343d9e1` | 89,459 | 103,460 | -14,001 | **0** (0.00%) | 0 | replay costs more | — |  |
 | Ethena | [`0x6f12cb87…`](https://etherscan.io/tx/0x6f12cb8706d5c2f6fa999ff37dd5728cd9530d0d9c256efc715800df45d72403) | `deposit` ✓ `0x6e553f65` | 88,423 | 99,316 | -10,893 | **0** (0.00%) | 0 | replay costs more | — | heuristic first claimed 3.94% |
 | Ethena | [`0x20437c45…`](https://etherscan.io/tx/0x20437c4593fc6e80acdd78578e134c336cc0a1f827e56cb36a18e8becb5d62e0) | *sUSDe* | 84,342 | 83,451 | +891 | **0** (0.00%) | 0 | under the floor | — |  |
-| Ethena | [`0xe9eebd35…`](https://etherscan.io/tx/0xe9eebd353a8623401f2106e17a73cf433f31c3f6ac45722ffe61c2f70965e5cd) `heur` | `deposit` ✓ `0x6e553f65` | 83,659 | 57,942 | +25,717 | **0** (0.00%) | 0 | under the floor | — |  |
-| Ethena | [`0x7a4241aa…`](https://etherscan.io/tx/0x7a4241aa594bf958bdb4c5fa93ef04a12f6cc1f6b854584000349f75c809b11d) `heur` | `cooldownShares` ✓ `0x9343d9e1` | 72,371 | 65,909 | +6,462 | **0** (0.00%) | 0 | under the floor | — |  |
-| Ethena | [`0x03c37967…`](https://etherscan.io/tx/0x03c37967a8003d273e3a8b8518689d304fd03c93d429754f0df4a66e663355af) `heur` | `deposit` ✓ `0x6e553f65` | 66,559 | 57,942 | +8,617 | **0** (0.00%) | 0 | under the floor | — |  |
+| Ethena | [`0xe9eebd35…`](https://etherscan.io/tx/0xe9eebd353a8623401f2106e17a73cf433f31c3f6ac45722ffe61c2f70965e5cd) | `deposit` ✓ `0x6e553f65` | 83,659 | 94,636 | -10,977 | **0** (0.00%) | 0 | replay costs more | — | **re-measured** — the old `heur` base was 57,942, understated by 36,694 |
+| Ethena | [`0x7a4241aa…`](https://etherscan.io/tx/0x7a4241aa594bf958bdb4c5fa93ef04a12f6cc1f6b854584000349f75c809b11d) | `cooldownShares` ✓ `0x9343d9e1` | 72,371 | 86,492 | -14,121 | **0** (0.00%) | 0 | replay costs more | — | **re-measured** — the old `heur` base was 65,909, understated by 20,583 |
+| Ethena | [`0x03c37967…`](https://etherscan.io/tx/0x03c37967a8003d273e3a8b8518689d304fd03c93d429754f0df4a66e663355af) | `deposit` ✓ `0x6e553f65` | 66,559 | 77,548 | -10,989 | **0** (0.00%) | 0 | replay costs more | — | **re-measured** — the old `heur` base was 57,942, understated by 19,606 |
 
 | ERC-4337 EntryPoint | [`0x030b4fd3…`](https://etherscan.io/tx/0x030b4fd3776594fc57df6451e83b61e916554227a0c7208f2f6a039f9a2bc312) | `handleOps` | 1,694,622 | 201,100 | +1,493,522 | **1,443,522** (85.18%) | — | — | — | **SUSPECT** — see EntryPoint section |
 | ERC-4337 EntryPoint | [`0xb752f16b…`](https://etherscan.io/tx/0xb752f16bd51240342af289dfffebd5276e28ec313eb12ba8bf4ad654794bd807) | `handleOps` | 1,103,781 | 186,440 | +917,341 | **867,341** (78.58%) | — | — | — | **SUSPECT** — reproduced twice, but see EntryPoint section |
@@ -1313,7 +1315,7 @@ Four Morpho liquidations failed the real replay for other reasons and appear in 
 
 ## What to be careful about
 
-- **15 of the results are `heur` fallbacks** (Morpho 7, Euler 3, Ethena 3, Railgun 2). Ignore their savings figures. The three biggest apparent Morpho wins in this file (16.32%, 13.47%, 11.25% — quoted at the old floor) are all fallbacks. **The heuristic estimator itself was also fixed upstream (`271cd74`), so these rows are stale for two independent reasons and must be re-run on the rebuilt binary before use.** Of the 18 fallbacks re-measured properly so far, **16 collapsed to 0%** (6 in Ethena, 4 corrected in place across Morpho/Aave/Ether.fi, all 8 in ENS). The two exceptions are both Pyth, where a real saving survived but shrank — `0x8874d5a5…` from 65.79% to 49.76%, and `0x616ba1cd…` down to 63.94% (41.53% and 52.06% respectively at the 50,000 floor). So a fallback is not automatically fictional; it is automatically *overstated*, and on this evidence it is fictional about 90% of the time.
+- **11 of the results are `heur` fallbacks** (Morpho 7, Euler 2, Railgun 2). Four were re-measured on 2026-09-10 — all three Ethena rows and one Euler `batch` — and every one had an **understated** base, so each moved further negative. The remaining 11 resisted 6-8 attempts each; they are concentrated in exactly the Morpho liquidator/router and Railgun bundle shapes the replay defect hits. Ignore their savings figures. The three biggest apparent Morpho wins in this file (16.32%, 13.47%, 11.25% — quoted at the old floor) are all fallbacks. **The heuristic estimator itself was also fixed upstream (`271cd74`), so these rows are stale for two independent reasons and must be re-run on the rebuilt binary before use.** Of the 18 fallbacks re-measured properly so far, **16 collapsed to 0%** (6 in Ethena, 4 corrected in place across Morpho/Aave/Ether.fi, all 8 in ENS). The two exceptions are both Pyth, where a real saving survived but shrank — `0x8874d5a5…` from 65.79% to 49.76%, and `0x616ba1cd…` down to 63.94% (41.53% and 52.06% respectively at the 50,000 floor). So a fallback is not automatically fictional; it is automatically *overstated*, and on this evidence it is fictional about 90% of the time.
 - **Most unmeasurable transactions are large.** EigenLayer's real ceiling is unknown for this reason. The exceptions are Sky's 110,061-gas `deposit` and Centrifuge's 131,622-gas `multicall`, which fail for reasons unrelated to size.
 - **Two Ondo rows are mislabelled traffic**, flagged in the notes column — an MEV bot and an aggregator that happen to touch Ondo tokens. Ondo's own mint and redeem transactions save 1–2%.
 - **A `heur` row with zero external calls is still not trustworthy.** ENS produced four such rows and the biggest was wrong by 125,611 gas. The fallback underprices fresh storage writes as well as calls.
