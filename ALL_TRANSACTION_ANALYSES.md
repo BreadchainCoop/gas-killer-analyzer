@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-425 Ethereum mainnet transactions across 43 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
+434 Ethereum mainnet transactions across 44 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -169,6 +169,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Securitize** | 8 | 0 | **0.00%** | — | replay costs more (6), under the floor (2); every `transfer` routes compliance through a `CALL` — **1.14M gas yields 3,777 removable** |
 | **OriginTrail** | 6 | 0 | **0.00%** | — | replay costs more (6); TRAC token only — the knowledge graph runs on NeuroWeb, not mainnet |
 | **UMA** | 8 | 0 | **0.00%** | — | replay costs more (6), under the floor (2); OOv2 and the DVM have **zero mainnet traffic** — Polymarket settles on Polygon |
+| **Usual** | 9 | 0 | **0.00%** | — | under the floor (7), replay costs more (2); `redeem` is 5.65/day at 524,715 gas and yields only ~18,000 removable |
 
 ## ENS: 18 transactions, 18 measured, nothing saved
 
@@ -1280,6 +1281,15 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | Rocket Pool | [`0xdc556b4b…`](https://etherscan.io/tx/0xdc556b4b2ebb3e0eda17cf6dca209175007ab17364db8dde96223fa9fa950f2a) | NetworkBalances `submitBalances` ✓ `0x979611ea` | 187,428 | 165,233 | +22,195 | **0** (0.00%) | 0 | under the floor | 10 (8C/2L2) | the submission that reached quorum and wrote the new rate — extra writes, less removable |
 | Rocket Pool | [`0x22f5188c…`](https://etherscan.io/tx/0x22f5188cf567beae2303a0bc661c0fe54c33918029700dd58a8e71902dcf3b46) | NetworkBalances `submitBalances` ✓ `0x979611ea` | 115,397 | 104,100 | +11,297 | **0** (0.00%) | 0 | under the floor | 4 (3C/1L2) |  |
 | Rocket Pool | [`0x315979d6…`](https://etherscan.io/tx/0x315979d6b2de17cdeb2311a1845eabdbc023dcff641e515d8ad291bad4dcc3dc) | NodeStaking `stakeRPL` ✓ `0x3e200d4b` | 176,957 | 183,471 | -6,514 | **0** (0.00%) | 0 | replay costs more | 8 (7C/1L2) | RPL staking is bookkeeping |
+| Usual | [`0x54164425…`](https://etherscan.io/tx/0x541644256d45b8418ad9a2312a71d81a89da806f514fcf2cc768e26e332f3ca0) | DaoCollateral `redeem` ✓ `0x2b83cccd` | 524,715 | 506,367 | +18,348 | **0** (0.00%) | 0 | under the floor | — | the median redeem; 157 of Usual's 192 direct calls |
+| Usual | [`0x22f4b076…`](https://etherscan.io/tx/0x22f4b076bdeb8a081fbedcb1fd6875f5bed16c30d5d2d0d695c30a6dd65ccc0c) | DaoCollateral `redeem` ✓ `0x2b83cccd` | 522,184 | 503,836 | +18,348 | **0** (0.00%) | 0 | under the floor | — |  |
+| Usual | [`0xddb1eaa6…`](https://etherscan.io/tx/0xddb1eaa6346cceece4a46a1e901d896945380a47a7a240d01e81f184b30d0cb1) | DaoCollateral `redeem` ✓ `0x2b83cccd` | 536,239 | 520,151 | +16,088 | **0** (0.00%) | 0 | under the floor | — | 522k-536k gas yields 16-18k removable |
+| Usual | [`0x2faf09ac…`](https://etherscan.io/tx/0x2faf09ac17b46504388ff96f978cc24b473b90b913db87a9328a7c64daff2a5f) | USD0++ `transfer` ✓ `0xa9059cbb` | 53,175 | 40,780 | +12,395 | **0** (0.00%) | 0 | under the floor | — | bond token — most removable work of any Usual row, proportionally |
+| Usual | [`0x33193a90…`](https://etherscan.io/tx/0x33193a9019e93c917e641114e429cbb07bdfddb56fd47c49be2381412986e462) | USD0++ `transfer` ✓ `0xa9059cbb` | 57,999 | 45,760 | +12,239 | **0** (0.00%) | 0 | under the floor | — |  |
+| Usual | [`0x943b0335…`](https://etherscan.io/tx/0x943b0335f766b9cd7ca34b7025f1b059b2534bf5324f968c9687c59ecf29150c) | USUAL `transfer` ✓ `0xa9059cbb` | 46,236 | 45,772 | +464 | **0** (0.00%) | 0 | under the floor | — | +464 — a fixed 464 regardless of size |
+| Usual | [`0xb3ecb597…`](https://etherscan.io/tx/0xb3ecb597e3958f099893a21135584caff2b48454c784ebbdfba13e9cc453c3a7) | USUAL `transfer` ✓ `0xa9059cbb` | 63,336 | 62,872 | +464 | **0** (0.00%) | 0 | under the floor | — | +464 again on 17,100 more gas |
+| Usual | [`0x99d5c54e…`](https://etherscan.io/tx/0x99d5c54e48ff8903d021dab183b90b21660de194851f6aca8dfbd27e572a1339) | USUALx `approve` ✓ `0x095ea7b3` | 51,436 | 54,988 | -3,552 | **0** (0.00%) | 0 | replay costs more | — |  |
+| Usual | [`0x3a1b8bd9…`](https://etherscan.io/tx/0x3a1b8bd97e9f6fd1e2b49c493a694363d3a588a03089b34641480abde3436b54) | USUAL `approve` ✓ `0x095ea7b3` | 51,409 | 55,012 | -3,603 | **0** (0.00%) | 0 | replay costs more | — |  |
 
 ## Transactions that could not be measured at all
 

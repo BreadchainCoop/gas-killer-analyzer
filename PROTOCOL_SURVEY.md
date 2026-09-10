@@ -2092,6 +2092,36 @@ nothing is hidden — and it is worth a fifth of what Kelp's 83.29% is worth, be
 times a day. Meanwhile the paths with real volume (268 rETH burns/day) save nothing, because they
 belong to somebody else's router.
 
+## Usual — the last name on the list, and a clean negative
+
+**9 measured, 0 saving.** USD0, USD0++, USUAL, USUALx and DaoCollateral all verified on-chain
+(every one a 1,129-byte ERC-1967 proxy, so the implementations are visible to the encoder).
+
+Volume is real — 11,317 transactions in 27.8 days, 407/day — but almost all of it is token
+transfers. The protocol's own path is `DaoCollateral.redeem(address,uint256,uint256)`: **157
+direct calls, 524,715 gas median, 5.65/day**.
+
+| gas used | base | surplus | function |
+|---:|---:|---:|---|
+| 536,239 | 520,151 | +16,088 | `redeem` |
+| 524,715 | 506,367 | +18,348 | `redeem` |
+| 522,184 | 503,836 | +18,348 | `redeem` |
+| 57,999 | 45,760 | +12,239 | USD0++ `transfer` |
+| 53,175 | 40,780 | +12,395 | USD0++ `transfer` |
+| 63,336 | 62,872 | +464 | USUAL `transfer` |
+| 46,236 | 45,772 | +464 | USUAL `transfer` |
+| 51,436 | 54,988 | -3,552 | USUALx `approve` |
+| 51,409 | 55,012 | -3,603 | USUAL `approve` |
+
+**A half-million-gas redeem yields 18,000 of removable work** — 3.4% of the transaction, and
+31,652 short of the floor. The burn, the collateral transfer and the fee accounting all happen
+through calls that get replayed, so the surplus is only DaoCollateral's own dispatch.
+
+The USUAL token transfer is the tidiest illustration of a constant surplus in the file: **+464 at
+46,236 gas and +464 at 63,336 gas.** Identical to the gas, across a 17,100-gas difference.
+
+Usual is the last entry on the 49-protocol longlist.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is
