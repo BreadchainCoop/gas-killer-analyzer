@@ -2007,6 +2007,91 @@ rather than negative — vote-delegation bookkeeping — and it is worth nothing
 
 **Worth $0/month.** Median 0.295 gwei.
 
+## Rocket Pool — the first win in this stretch, and every deposit qualifies
+
+**11 measured, 6 saving, best 15.66%.** After six consecutive zeroes, Rocket Pool is the first
+protocol in this stretch with a real saving, and the winning path is user-facing rather than an
+operator function.
+
+**The addresses had to be resolved, not remembered.** The `RocketDepositPool` address carried
+into this session was dead — a census against it returned 0 transactions. Rocket Pool routes
+everything through `RocketStorage` (`0x1d8f8f00…0ee0Fa46`), so the live addresses come from
+`getAddress(keccak256("contract.address" + name))`:
+
+| contract | resolved |
+|---|---|
+| rocketDepositPool | `0xce152942…decdf4fdc` |
+| rocketTokenRETH | `0xae78736C…74Fc6393` |
+| rocketNodeStaking | `0xedfc7dca…874490ee3e` |
+| rocketNetworkBalances | `0x1d9f14c6…dd248e9473` |
+
+Anyone repeating this should resolve through the registry rather than trust a hardcoded address.
+
+**rETH burns are not Rocket Pool transactions.** 7,442 burns in 27.8 days (268/day), and **0 of
+40 sampled called rETH directly** — every one arrives through an arbitrage router. Burning rETH is
+an arb trade against the secondary market, so it scores as the router, not as Rocket Pool.
+
+**Results.**
+
+| gas used | base | surplus | saving | function |
+|---:|---:|---:|---:|---|
+| 227,313 | 141,720 | +85,593 | **35,593 (15.66%)** | `deposit()` |
+| 160,886 | 89,118 | +71,768 | **21,768 (13.53%)** | `deposit()` |
+| 160,886 | 89,118 | +71,768 | **21,768 (13.53%)** | `deposit()` |
+| 177,986 | 106,290 | +71,696 | **21,696 (12.19%)** | `deposit()` |
+| 177,986 | 106,314 | +71,672 | **21,672 (12.18%)** | `deposit()` |
+| 251,514 | 195,982 | +55,532 | **5,532 (2.20%)** | NodeStaking `0xa06286bf` |
+| 122,990 | 81,006 | +41,984 | 0 | NodeStaking `0x33621a76` |
+| 140,791 | 104,100 | +36,691 | 0 | `submitBalances` |
+| 187,428 | 165,233 | +22,195 | 0 | `submitBalances` (quorum-reaching) |
+| 115,397 | 104,100 | +11,297 | 0 | `submitBalances` |
+| 176,957 | 183,471 | -6,514 | 0 | `stakeRPL` |
+
+**Every deposit qualifies, and that was checked exhaustively rather than sampled.** All 122 direct
+`deposit()` calls in the window were enumerated: gas runs 160,886 to 227,313, median 177,986, and
+**122 of 122 sit above the ~121,700-gas break-even**. Surplus is flat near 71,700 between 160k and
+178k gas and rises to 85,593 at the top, so it grows with size rather than shrinking. There are no
+marginal cases in this distribution.
+
+`submitBalances` is the near miss: the oracle consensus path, 113 submissions in the window. Base
+is *fixed at 104,100* for a single-log submission, so surplus is set entirely by what the original
+spent, and a submission would need ≥154,100 gas to clear the floor. The median is 140,791. Note
+the inversion — the 187,428-gas submission that reached quorum and wrote the new exchange rate has
+*less* removable work (22,195) than the plain 140,791-gas one (36,691), because reaching quorum
+adds storage writes.
+
+### What the surplus actually consists of — read this before quoting the number
+
+The recorded program for a deposit is three instructions:
+
+```
+1: Call  rETH.mint(uint256,address)      <- replayed, cost lands in base
+2: Log2  DepositReceived
+3: Call  rETH  0x6c985a88  value=10 ETH  <- replayed
+```
+
+Larger deposits add four more `Call`s to `RocketStorage` `setUint`/`addUint`. So the state
+*writes* are replayed and correctly charged to base — the surplus is not hiding them.
+
+What the surplus mostly is, instead, is **`STATICCALL` gas**. Rocket Pool reads every parameter —
+deposit fee, pool capacity, minipool queue state — from `RocketStorage` via `getUint`/`getAddress`
+staticcalls, and `trace.rs` ignores `STATICCALL` entirely, so that gas is counted as removable.
+Under the model it genuinely is removable: applying a final state diff never performs the reads.
+But this is a different kind of win from Kelp or Chronicle, where the surplus is cryptography.
+**Rocket Pool's saving is registry-lookup overhead, and it exists because the protocol's storage
+architecture is unusually indirect.** A protocol that kept its parameters in its own storage slots
+would show a smaller surplus for identical behaviour.
+
+**Worth about $5/month.** 4.39 deposits/day x ~21,700 gas = 2.86M gas/month; at the 0.703 gwei
+these transactions actually paid and ETH at $2,491.60 that is **$5.01/month**, or **$142/month at
+20 gwei**.
+
+That is the anti-correlation in its clearest form yet. Rocket Pool is structurally a *better*
+candidate than Kelp — the win is user-facing, every instance clears the floor, nothing is marginal,
+nothing is hidden — and it is worth a fifth of what Kelp's 83.29% is worth, because it runs 4.39
+times a day. Meanwhile the paths with real volume (268 rETH burns/day) save nothing, because they
+belong to somebody else's router.
+
 ## What this is actually worth in dollars
 
 Every figure above is a percentage. Percentages were the wrong unit, and this section is

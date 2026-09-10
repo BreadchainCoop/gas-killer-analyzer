@@ -1,6 +1,6 @@
 # Every transaction analysed, in one place
 
-414 Ethereum mainnet transactions across 42 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
+425 Ethereum mainnet transactions across 43 protocols, all run through this repo's analyzer (`gas-analyzer-cli t <hash>`). Eleven more could not be run at all; they are listed at the end.
 
 > ### Revised for the new signature floor — 2026-09-04
 >
@@ -137,6 +137,7 @@ Best and typical figures use only properly measured runs. They exclude the two O
 | **Midas** | 12 | 9 | **23.54%** | 10.21% | under the floor (2), replay costs more (1); `depositInstant` wins are **not** call-blocked |
 | **Chronicle** | 24 | 17 | **32.64%** | 30.17% | under the floor (4), replay costs more (3) |
 | **Privacy Pools** | 11 | 2 | **19.47%** | 18.00% | replay costs more (9) |
+| **Rocket Pool** | 11 | 6 | **15.66%** | 11.55% | under the floor (4), replay costs more (1); **every one of 122 deposits in 27.8 days clears the floor** — but surplus is largely RocketStorage `STATICCALL` overhead, not arithmetic |
 | **Aragon** | 19 | 6 | **24.15%** | 4.64% | replay costs more (11), under the floor (2); all wins **call-dominated**, and only `execute` ever saves — 6 of 6 |
 | **Ondo** | 8 | 2 | **12.09%** | 6.51% | under the floor (3), replay costs more (3) |
 | **Ether.fi** | 13 | 2 | **11.09%** | 5.61% | replay costs more (6), under the floor (5) |
@@ -1268,6 +1269,17 @@ Update shorthand: `S` storage write, `C` call, `L0`–`L4` log with that many to
 | UMA | [`0xe6064d8f…`](https://etherscan.io/tx/0xe6064d8f09da6c0dfcda3b87195e0a747b257d9e784c1f369b41b0c741cdd25c) | OOv3 `settleAssertion` ✓ `0x4124beef` | 73,838 | 85,358 | -11,520 | **0** (0.00%) | 0 | replay costs more | — |  |
 | UMA | [`0x68d8e07d…`](https://etherscan.io/tx/0x68d8e07d8db8a83f08a78b05fe62533d1cc8c590a79f33a71ce471c003301d90) | UMA `transfer` ✓ `0xa9059cbb` | 176,237 | 202,604 | -26,367 | **0** (0.00%) | 0 | replay costs more | — | gas outlier, most negative row |
 | UMA | [`0x8e9901d6…`](https://etherscan.io/tx/0x8e9901d6dc68b0f9ce6691573799e8db1a05ca7e5e0cf558471bda638526740c) | UMA `approve` ✓ `0x095ea7b3` | 46,597 | 55,552 | -8,955 | **0** (0.00%) | 0 | replay costs more | — |  |
+| Rocket Pool | [`0x47fc4105…`](https://etherscan.io/tx/0x47fc41058c836cfa010a6e3ffbce61f8570e8bbcf8f4140bfbce6546a4aa3906) | DepositPool `deposit` ✓ `0xd0e30db0` | 227,313 | 141,720 | +85,593 | **35,593** (15.66%) | 0 | — | 7 (6C/1L2) | largest deposit in 27.8 days; surplus rises above ~180k gas |
+| Rocket Pool | [`0x1208d1e9…`](https://etherscan.io/tx/0x1208d1e9b0ce1878beb12fd78cea37505b90ddc352cf1fdcfbf5a05fd7a91780) | DepositPool `deposit` ✓ `0xd0e30db0` | 160,886 | 89,118 | +71,768 | **21,768** (13.53%) | 0 | — | 3 (2C/1L2) |  |
+| Rocket Pool | [`0x01177d43…`](https://etherscan.io/tx/0x01177d43112f95f21805bba444d66b4d235dc4c10d45dddf0466e6b00e2e104a) | DepositPool `deposit` ✓ `0xd0e30db0` | 160,886 | 89,118 | +71,768 | **21,768** (13.53%) | 0 | — | 3 (2C/1L2) | identical to the row above — the path is deterministic at a given size |
+| Rocket Pool | [`0x1d182652…`](https://etherscan.io/tx/0x1d1826528ebd68e11c68e2c555c1ec304683c0ce3f04db5d7f57ee5b6346374f) | DepositPool `deposit` ✓ `0xd0e30db0` | 177,986 | 106,290 | +71,696 | **21,696** (12.19%) | 0 | — | 3 (2C/1L2) |  |
+| Rocket Pool | [`0x08841463…`](https://etherscan.io/tx/0x08841463d6d14e2a918ebddb26036350a93d40c44eb3315eaada4b1d0df790e8) | DepositPool `deposit` ✓ `0xd0e30db0` | 177,986 | 106,314 | +71,672 | **21,672** (12.18%) | 0 | — | 3 (2C/1L2) |  |
+| Rocket Pool | [`0xee35510c…`](https://etherscan.io/tx/0xee35510ca6771e9dc6cee233f43eab75e2157a9805871f89df6c3cf71b966007) | NodeStaking *unidentified* `0xa06286bf` | 251,514 | 195,982 | +55,532 | **5,532** (2.20%) | 0 | — | 8 (7C/1L2) |  |
+| Rocket Pool | [`0x05a1f5a6…`](https://etherscan.io/tx/0x05a1f5a6b73201be3cbc844d3bad5ab1e81291406d4663b09a9df1a0d1ffe37f) | NodeStaking *unidentified* `0x33621a76` | 122,990 | 81,006 | +41,984 | **0** (0.00%) | 0 | under the floor | 3 (2C/1L2) | +41,984 — 8,016 short |
+| Rocket Pool | [`0x90f04865…`](https://etherscan.io/tx/0x90f0486562a444f20c3e1f2c30f3f5860c0370601de6a4b038b406c49bb1c29e) | NetworkBalances `submitBalances` ✓ `0x979611ea` | 140,791 | 104,100 | +36,691 | **0** (0.00%) | 0 | under the floor | 4 (3C/1L2) | median oracle submission; base is fixed at 104,100 for a 1-log submission |
+| Rocket Pool | [`0xdc556b4b…`](https://etherscan.io/tx/0xdc556b4b2ebb3e0eda17cf6dca209175007ab17364db8dde96223fa9fa950f2a) | NetworkBalances `submitBalances` ✓ `0x979611ea` | 187,428 | 165,233 | +22,195 | **0** (0.00%) | 0 | under the floor | 10 (8C/2L2) | the submission that reached quorum and wrote the new rate — extra writes, less removable |
+| Rocket Pool | [`0x22f5188c…`](https://etherscan.io/tx/0x22f5188cf567beae2303a0bc661c0fe54c33918029700dd58a8e71902dcf3b46) | NetworkBalances `submitBalances` ✓ `0x979611ea` | 115,397 | 104,100 | +11,297 | **0** (0.00%) | 0 | under the floor | 4 (3C/1L2) |  |
+| Rocket Pool | [`0x315979d6…`](https://etherscan.io/tx/0x315979d6b2de17cdeb2311a1845eabdbc023dcff641e515d8ad291bad4dcc3dc) | NodeStaking `stakeRPL` ✓ `0x3e200d4b` | 176,957 | 183,471 | -6,514 | **0** (0.00%) | 0 | replay costs more | 8 (7C/1L2) | RPL staking is bookkeeping |
 
 ## Transactions that could not be measured at all
 
