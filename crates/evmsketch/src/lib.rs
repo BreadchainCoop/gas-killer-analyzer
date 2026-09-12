@@ -27,6 +27,7 @@ use sp1_cc_host_executor::{EvmSketch, Genesis};
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use url::Url;
 
 /// Ethereum mainnet chain ID.
@@ -236,11 +237,33 @@ impl EvmSketchExecutorCache {
         rpc_url: &str,
         block_number: u64,
     ) -> Result<Arc<DefaultEvmSketchExecutor>> {
+        self.get_or_build_timed(rpc_url, block_number)
+            .await
+            .map(|(executor, _)| executor)
+    }
+
+    /// As [`Self::get_or_build`], also reporting what the lookup cost.
+    ///
+    /// A hit and a miss differ by an executor build plus, on the first call for an RPC URL, an
+    /// `eth_chainId` round-trip — enough that a caller measuring per-phase cost cannot interpret
+    /// its own numbers without knowing which happened.
+    pub async fn get_or_build_timed(
+        &self,
+        rpc_url: &str,
+        block_number: u64,
+    ) -> Result<(Arc<DefaultEvmSketchExecutor>, ExecutorLookup)> {
+        let started = Instant::now();
         let key = (rpc_url.to_string(), block_number);
         {
             let mut cache = self.inner.lock().expect("executor cache mutex poisoned");
             if let Some(exec) = cache.get(&key) {
-                return Ok(Arc::clone(exec));
+                return Ok((
+                    Arc::clone(exec),
+                    ExecutorLookup {
+                        cache_hit: true,
+                        build: started.elapsed(),
+                    },
+                ));
             }
         }
 
@@ -282,8 +305,38 @@ impl EvmSketchExecutorCache {
             let mut cache = self.inner.lock().expect("executor cache mutex poisoned");
             cache.put(key, Arc::clone(&exec));
         }
-        Ok(exec)
+        Ok((
+            exec,
+            ExecutorLookup {
+                cache_hit: false,
+                build: started.elapsed(),
+            },
+        ))
     }
+}
+
+/// What one executor-cache lookup cost.
+///
+/// Only this crate constructs one, so the field set may grow.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutorLookup {
+    /// Whether the executor was already cached, so no build was paid for.
+    pub cache_hit: bool,
+    /// Time spent in the lookup: near zero on a hit, the executor build on a miss.
+    pub build: Duration,
+}
+
+/// What one gas estimate cost, split by bottleneck.
+///
+/// Only this crate constructs one, so the field set may grow.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EstimateTimings {
+    /// Time fetching account and slot state up front: one `eth_getProof` per hinted address.
+    pub prefetch: Duration,
+    /// Time executing the payload under revm.
+    pub execute: Duration,
 }
 
 // ============================================================================
@@ -479,22 +532,55 @@ impl DefaultEvmSketchExecutor {
         state_updates: &[gas_analyzer_core::StateUpdate],
         storage_hints: &HashMap<Address, Vec<B256>>,
     ) -> Result<u64> {
+        self.estimate_state_changes_gas_with_hints_timed(
+            contract_address,
+            caller_address,
+            state_updates,
+            storage_hints,
+        )
+        .await
+        .map(|(gas, _)| gas)
+    }
+
+    /// As [`Self::estimate_state_changes_gas_with_hints`], also reporting the prefetch and
+    /// execution costs separately.
+    ///
+    /// The two are very different work behind one `await`: the prefetch is network round-trips,
+    /// while the execution is local revm plus whatever cold-miss reads the hints failed to cover.
+    /// A caller deciding between more bandwidth and more cores needs them apart.
+    pub async fn estimate_state_changes_gas_with_hints_timed(
+        &self,
+        contract_address: Address,
+        caller_address: Address,
+        state_updates: &[gas_analyzer_core::StateUpdate],
+        storage_hints: &HashMap<Address, Vec<B256>>,
+    ) -> Result<(u64, EstimateTimings)> {
         let state_block = self.anchor_block_number().saturating_sub(1);
         let simple_db = SimpleRpcDb::new(self.sketch.provider.clone(), state_block);
         let mut cache_db = CacheDB::new(simple_db);
 
+        let prefetch_started = Instant::now();
         prefetch_slots_into_cache(&mut cache_db, storage_hints)
             .await
             .context("storage slot prefetch failed")?;
+        let prefetch = prefetch_started.elapsed();
 
         let sim_env = self.sim_env();
-        gas_analyzer_estimator::estimate_state_changes_gas(
+        let execute_started = Instant::now();
+        let gas = gas_analyzer_estimator::estimate_state_changes_gas(
             &mut cache_db,
             contract_address,
             caller_address,
             state_updates,
             &sim_env,
-        )
+        )?;
+        Ok((
+            gas,
+            EstimateTimings {
+                prefetch,
+                execute: execute_started.elapsed(),
+            },
+        ))
     }
 
     /// Build a `SimEnv` from the anchored block header.
@@ -826,7 +912,72 @@ impl StateEncoding {
     }
 }
 
+/// Which extractor produced the state-update program.
+///
+/// The distinction is a cost distinction, not just a representation one: the net form reads two
+/// cheap tracers and never fetches a struct-log trace, while the struct-log path fetches a trace
+/// whose size grows with execution steps and then parses every one of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Extraction {
+    /// The prestate tracers produced the program. No struct-log trace was fetched or parsed.
+    PrestateNet,
+    /// Struct logs produced the program, and no net form was attempted.
+    StructLog,
+    /// The net form was attempted, could not represent the call, and the struct-log extractor
+    /// produced the program — so this run paid for both.
+    PrestateFallback,
+}
+
+impl Extraction {
+    /// Stable lowercase name, for span fields and metric labels.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PrestateNet => "prestate_net",
+            Self::StructLog => "struct_log",
+            Self::PrestateFallback => "prestate_fallback",
+        }
+    }
+}
+
+/// Wall-clock cost of each phase of one encode run.
+///
+/// Split this way because the phases have different bottlenecks and different fixes: the fetch
+/// phases are network plus *remote* node CPU, while the parse and estimate phases are local CPU
+/// with no yield points. Knowing which dominates for a given workload decides whether to buy
+/// bandwidth or cores.
+///
+/// **`trace_fetch` and `executor_build` overlap and must never be summed.** They are the two
+/// branches of one `tokio::try_join!`, so on a cache miss the build hides behind the fetch and
+/// the elapsed time of the pair is roughly the larger of the two, not the total. Every other
+/// pair is sequential and may be added.
+///
+/// Deliberately exhaustive, unlike the structs that carry it: consumers build one to exercise
+/// their own reporting, and a new phase here means a new series they have to decide how to
+/// publish. A compile error is the right way to tell them; silently defaulting a phase to zero
+/// would leave real cost unattributed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EncodePhaseTimings {
+    /// Time awaiting trace RPCs: `debug_traceCall` on the struct-log path, or the two cheap
+    /// tracers on the prestate path. Network plus remote node CPU. On
+    /// [`Extraction::PrestateFallback`] this covers both, because both were paid.
+    pub trace_fetch: Duration,
+    /// Time turning struct logs into state updates: local CPU, `O(execution steps)`. Zero on
+    /// [`Extraction::PrestateNet`], which never fetches a struct-log trace.
+    pub parse: Duration,
+    /// Time building the revm executor. Near zero when `executor_cache_hit` is set.
+    pub executor_build: Duration,
+    /// Time prefetching account and slot state for the gas estimate: one `eth_getProof` per
+    /// hinted address.
+    pub prefetch: Duration,
+    /// Time executing the payload under revm to price it: local CPU, plus any cold-miss state
+    /// reads the prefetch did not cover.
+    pub revm_estimate: Duration,
+}
+
 /// What an encode run extracted for one call.
+///
+/// Only this crate constructs one, so the field set may grow.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct EncodedStateUpdates {
     /// The ABI-encoded state-update program: the payload that gets signed and applied on-chain.
@@ -839,6 +990,12 @@ pub struct EncodedStateUpdates {
     pub is_heuristic: bool,
     /// Opcodes the extractor could not represent and skipped.
     pub skipped_opcodes: HashSet<Opcode>,
+    /// Which extractor produced the program.
+    pub extraction: Extraction,
+    /// Whether the revm executor came from the cache rather than being built for this run.
+    pub executor_cache_hit: bool,
+    /// What each phase of this run cost.
+    pub timings: EncodePhaseTimings,
 }
 
 /// Compute encoded state updates and gas estimate for a transaction call using EvmSketch.
@@ -950,7 +1107,7 @@ pub async fn call_to_encoded_state_updates_with_evmsketch_profiled(
     // Extract the state updates (hybrid prestate/struct-log path) and build the executor
     // concurrently — they are independent, so on a cache miss this hides the executor build behind
     // the trace fetch.
-    let ((state_updates, skipped_opcodes, call_gas_total), executor) = tokio::try_join!(
+    let (extracted, (executor, executor_lookup)) = tokio::try_join!(
         extract_state_updates_hybrid(
             &provider,
             tx_request,
@@ -959,8 +1116,16 @@ pub async fn call_to_encoded_state_updates_with_evmsketch_profiled(
             encoding,
             profile
         ),
-        cache.get_or_build(rpc_url, block_number),
+        cache.get_or_build_timed(rpc_url, block_number),
     )?;
+    let Extracted {
+        state_updates,
+        skipped_opcodes,
+        call_gas_total,
+        extraction,
+        trace_fetch,
+        parse,
+    } = extracted;
     tracing::Span::current().record("state_update_count", state_updates.len());
 
     // The unbounded profile's whole bargain: compute may be unbounded, the payload that lands
@@ -1000,8 +1165,8 @@ pub async fn call_to_encoded_state_updates_with_evmsketch_profiled(
         all_hints.entry(addr).or_default().extend(slots);
     }
 
-    let gas_estimate = executor
-        .estimate_state_changes_gas_with_hints(
+    let (gas_estimate, estimate) = executor
+        .estimate_state_changes_gas_with_hints_timed(
             contract_address,
             caller_address,
             &state_updates,
@@ -1015,6 +1180,15 @@ pub async fn call_to_encoded_state_updates_with_evmsketch_profiled(
         gas_estimate,
         is_heuristic: false,
         skipped_opcodes,
+        extraction,
+        executor_cache_hit: executor_lookup.cache_hit,
+        timings: EncodePhaseTimings {
+            trace_fetch,
+            parse,
+            executor_build: executor_lookup.build,
+            prefetch: estimate.prefetch,
+            revm_estimate: estimate.execute,
+        },
     })
 }
 
@@ -1041,18 +1215,42 @@ async fn extract_state_updates_hybrid<P: Provider + DebugApi>(
     consumer: Address,
     encoding: StateEncoding,
     profile: SimProfile,
-) -> Result<(Vec<StateUpdate>, HashSet<Opcode>, u64)> {
-    if encoding.signs_prestate_net()
-        && let Some(updates) =
-            try_prestate_net(provider, &tx_request, block, consumer, profile).await?
-    {
-        tracing::Span::current().record("extraction", "prestate_net");
-        // The net form carries no `Call` ops by construction (eligibility rejects them), so no
-        // external call gas rides with it.
-        return Ok((updates, HashSet::new(), 0));
+) -> Result<Extracted> {
+    // Time the prestate attempt whether or not it succeeds: on a fallback its tracers were still
+    // paid for, and hiding that would make the net form look free when it is not.
+    let mut trace_fetch = Duration::ZERO;
+    let mut attempted_prestate = false;
+    if encoding.signs_prestate_net() {
+        attempted_prestate = true;
+        let started = Instant::now();
+        let net = try_prestate_net(provider, &tx_request, block, consumer, profile).await?;
+        trace_fetch += started.elapsed();
+        if let Some(updates) = net {
+            tracing::Span::current().record("extraction", Extraction::PrestateNet.as_str());
+            // The net form carries no `Call` ops by construction (eligibility rejects them), so
+            // no external call gas rides with it.
+            return Ok(Extracted {
+                state_updates: updates,
+                skipped_opcodes: HashSet::new(),
+                call_gas_total: 0,
+                extraction: Extraction::PrestateNet,
+                trace_fetch,
+                parse: Duration::ZERO,
+            });
+        }
     }
-    tracing::Span::current().record("extraction", "struct_log");
+    let extraction = if attempted_prestate {
+        Extraction::PrestateFallback
+    } else {
+        Extraction::StructLog
+    };
+    tracing::Span::current().record("extraction", extraction.as_str());
+
+    let started = Instant::now();
     let trace = get_trace_from_call_with_profile(provider, tx_request, block, profile).await?;
+    trace_fetch += started.elapsed();
+
+    let started = Instant::now();
     let (state_updates, skipped_opcodes, call_gas_total) = match encoding.struct_log_encoder() {
         // Re-entry detection is off (`None`): the simulation path never surfaces
         // the flag — only the historical-tx analyzers do.
@@ -1066,7 +1264,24 @@ async fn extract_state_updates_hybrid<P: Provider + DebugApi>(
         }
         StructLogEncoder::Canonical => compute_state_updates_canonical(trace, consumer)?,
     };
-    Ok((state_updates, skipped_opcodes, call_gas_total))
+    Ok(Extracted {
+        state_updates,
+        skipped_opcodes,
+        call_gas_total,
+        extraction,
+        trace_fetch,
+        parse: started.elapsed(),
+    })
+}
+
+/// One extraction run's output and what its phases cost.
+struct Extracted {
+    state_updates: Vec<StateUpdate>,
+    skipped_opcodes: HashSet<Opcode>,
+    call_gas_total: u64,
+    extraction: Extraction,
+    trace_fetch: Duration,
+    parse: Duration,
 }
 
 /// Build the prestate net form: `Ok(Some(updates))` when the call admits it, `Ok(None)` when the net
@@ -1107,6 +1322,27 @@ mod tests {
     use alloy::primitives::{address, bytes};
     use alloy::providers::ProviderBuilder;
     use gas_analyzer_core::types::IStateUpdateTypes;
+
+    /// These strings become Prometheus label values downstream, so they are API: renaming one
+    /// silently splits a metric series in two.
+    #[test]
+    fn test_extraction_label_names_are_stable() {
+        assert_eq!(Extraction::PrestateNet.as_str(), "prestate_net");
+        assert_eq!(Extraction::StructLog.as_str(), "struct_log");
+        assert_eq!(Extraction::PrestateFallback.as_str(), "prestate_fallback");
+    }
+
+    /// A default timing set is all zeros, so a phase that did not run reads as no cost rather
+    /// than as missing data.
+    #[test]
+    fn test_default_phase_timings_are_zero() {
+        let timings = EncodePhaseTimings::default();
+        assert_eq!(timings.trace_fetch, Duration::ZERO);
+        assert_eq!(timings.parse, Duration::ZERO);
+        assert_eq!(timings.executor_build, Duration::ZERO);
+        assert_eq!(timings.prefetch, Duration::ZERO);
+        assert_eq!(timings.revm_estimate, Duration::ZERO);
+    }
 
     /// `with_chain_id` must store the supplied value so `build` can bypass the
     /// `eth_chainId` probe.
@@ -1809,6 +2045,177 @@ mod tests {
             classify_prestate_eligibility(&frame, &diff, to)
         }
 
+        /// Spawn an anvil that presents itself as Sepolia.
+        ///
+        /// The full encode path builds a revm executor, and
+        /// [`chain_id_to_genesis_and_spec`] only knows mainnet, Sepolia, and Gnosis — anvil's
+        /// default 31337 has no genesis or hardfork schedule to anchor a `SpecId` against.
+        /// Tests that stop at extraction do not need this; ones that go through the estimate do.
+        async fn spawn_as_sepolia() -> LocalAnvil {
+            LocalAnvil::spawn_with(&["--chain-id", &SEPOLIA_CHAIN_ID.to_string()]).await
+        }
+
+        /// Run the full profiled entry point against anvil, so the assembled phase timings are
+        /// the ones a caller actually receives.
+        async fn encode_under(
+            anvil: &LocalAnvil,
+            cache: &EvmSketchExecutorCache,
+            to: Address,
+            block_number: u64,
+            encoding: StateEncoding,
+        ) -> EncodedStateUpdates {
+            call_to_encoded_state_updates_with_evmsketch_profiled(
+                cache,
+                &anvil.url,
+                call_request(to),
+                block_number,
+                encoding,
+                SimProfile::Chain,
+            )
+            .await
+            .expect("encode failed")
+        }
+
+        /// The struct-log path must attribute cost to both a fetch and a parse. This is the
+        /// distinction the whole split exists for: a slow task here is slow because of a remote
+        /// trace or because of local parsing, and the two have different fixes.
+        // `SimpleRpcDb` reads uncached state through `block_in_place`, which panics on a
+        // current-thread runtime.
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore = "spawns a local anvil; requires foundry on PATH"]
+        async fn test_struct_log_path_attributes_both_fetch_and_parse() {
+            let anvil = spawn_as_sepolia().await;
+            let provider = anvil.provider();
+            let consumer = address!("0x0000000000000000000000000000000000001001");
+            // A thousand-slot writer, so the parse cost is decisively non-zero rather than
+            // riding on clock granularity.
+            set_code(&provider, consumer, thousand_slot_writer_code()).await;
+            let block = provider.get_block_number().await.expect("block number");
+            let cache = EvmSketchExecutorCache::new(4);
+
+            let encoded =
+                encode_under(&anvil, &cache, consumer, block, StateEncoding::Legacy).await;
+
+            assert_eq!(encoded.extraction, Extraction::StructLog);
+            assert!(
+                encoded.timings.trace_fetch > Duration::ZERO,
+                "struct-log extraction fetches a trace"
+            );
+            assert!(
+                encoded.timings.parse > Duration::ZERO,
+                "struct-log extraction parses every log"
+            );
+            assert!(
+                encoded.timings.revm_estimate > Duration::ZERO,
+                "the payload is priced under revm"
+            );
+        }
+
+        /// The net form must report exactly zero parse cost, because it never fetches a
+        /// struct-log trace at all. This is what makes the `prestate-net` saving directly
+        /// measurable rather than inferred.
+        // `SimpleRpcDb` reads uncached state through `block_in_place`, which panics on a
+        // current-thread runtime.
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore = "spawns a local anvil; requires foundry on PATH"]
+        async fn test_the_net_form_never_pays_a_struct_log_parse() {
+            let anvil = spawn_as_sepolia().await;
+            let provider = anvil.provider();
+            let consumer = address!("0x0000000000000000000000000000000000001001");
+            set_code(&provider, consumer, eligible_code()).await;
+            set_storage(
+                &provider,
+                consumer,
+                B256::with_last_byte(5),
+                B256::with_last_byte(0x99),
+            )
+            .await;
+            let block = provider.get_block_number().await.expect("block number");
+            let cache = EvmSketchExecutorCache::new(4);
+
+            let encoded =
+                encode_under(&anvil, &cache, consumer, block, StateEncoding::PrestateNet).await;
+
+            assert_eq!(encoded.extraction, Extraction::PrestateNet);
+            assert_eq!(
+                encoded.timings.parse,
+                Duration::ZERO,
+                "the net form returns before the struct-log parse"
+            );
+            assert!(
+                encoded.timings.trace_fetch > Duration::ZERO,
+                "the net form still reads two tracers"
+            );
+        }
+
+        /// A call with no net form pays for the prestate tracers *and* the struct-log path. The
+        /// timings must show both, or `prestate-net` would look free on exactly the workloads
+        /// where it is most expensive.
+        // `SimpleRpcDb` reads uncached state through `block_in_place`, which panics on a
+        // current-thread runtime.
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore = "spawns a local anvil; requires foundry on PATH"]
+        async fn test_a_prestate_fallback_reports_paying_for_both_paths() {
+            let anvil = spawn_as_sepolia().await;
+            let provider = anvil.provider();
+            let callee = address!("0x0000000000000000000000000000000000002002");
+            let caller = address!("0x0000000000000000000000000000000000001001");
+            set_code(&provider, callee, callee_code()).await;
+            set_code(&provider, caller, caller_code(callee)).await;
+            let block = provider.get_block_number().await.expect("block number");
+            let cache = EvmSketchExecutorCache::new(4);
+
+            // An external CALL is not representable in the net form, so the dispatcher falls back.
+            assert!(matches!(
+                classify_call(&provider, caller).await,
+                PrestateEligibility::Fallback(_)
+            ));
+
+            let encoded =
+                encode_under(&anvil, &cache, caller, block, StateEncoding::PrestateNet).await;
+
+            assert_eq!(encoded.extraction, Extraction::PrestateFallback);
+            assert!(
+                encoded.timings.parse > Duration::ZERO,
+                "the fallback ran the struct-log extractor"
+            );
+            assert!(
+                encoded.timings.trace_fetch > Duration::ZERO,
+                "trace_fetch covers the wasted prestate tracers plus the struct-log trace"
+            );
+        }
+
+        /// The executor cache hit must be reported, because it is worth tens of milliseconds of
+        /// `executor_build` and without it the build histogram cannot be read.
+        // `SimpleRpcDb` reads uncached state through `block_in_place`, which panics on a
+        // current-thread runtime.
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore = "spawns a local anvil; requires foundry on PATH"]
+        async fn test_executor_cache_hit_is_reported() {
+            let anvil = spawn_as_sepolia().await;
+            let provider = anvil.provider();
+            let consumer = address!("0x0000000000000000000000000000000000001001");
+            set_code(&provider, consumer, eligible_code()).await;
+            let block = provider.get_block_number().await.expect("block number");
+            let cache = EvmSketchExecutorCache::new(4);
+
+            let first = encode_under(&anvil, &cache, consumer, block, StateEncoding::Legacy).await;
+            assert!(
+                !first.executor_cache_hit,
+                "a cold cache must build the executor"
+            );
+
+            // Same (rpc_url, block) key, so the second run reuses the executor.
+            let second = encode_under(&anvil, &cache, consumer, block, StateEncoding::Legacy).await;
+            assert!(second.executor_cache_hit, "the second run hits the cache");
+            assert!(
+                second.timings.executor_build < first.timings.executor_build,
+                "a hit must be cheaper than the build it avoided: hit {:?} vs miss {:?}",
+                second.timings.executor_build,
+                first.timings.executor_build
+            );
+        }
+
         /// Extract the same call under an encoding, through the real dispatcher, on the real chain
         /// environment.
         async fn extract_under(
@@ -1816,7 +2223,7 @@ mod tests {
             to: Address,
             encoding: StateEncoding,
         ) -> (Vec<StateUpdate>, HashSet<Opcode>) {
-            let (updates, skipped, _) = extract_state_updates_hybrid(
+            let extracted = extract_state_updates_hybrid(
                 provider,
                 call_request(to),
                 BlockId::latest(),
@@ -1826,7 +2233,7 @@ mod tests {
             )
             .await
             .expect("extraction failed");
-            (updates, skipped)
+            (extracted.state_updates, extracted.skipped_opcodes)
         }
 
         /// Extract under a simulation profile, holding the encoding at `PrestateNet`.
@@ -1835,7 +2242,7 @@ mod tests {
             to: Address,
             profile: SimProfile,
         ) -> (Vec<StateUpdate>, HashSet<Opcode>) {
-            let (updates, skipped, _) = extract_state_updates_hybrid(
+            let extracted = extract_state_updates_hybrid(
                 provider,
                 call_request(to),
                 BlockId::latest(),
@@ -1845,7 +2252,7 @@ mod tests {
             )
             .await
             .expect("extraction failed");
-            (updates, skipped)
+            (extracted.state_updates, extracted.skipped_opcodes)
         }
 
         /// Run the `PrestateNet` dispatcher and, for comparison, each struct-log encoder directly.
@@ -2274,7 +2681,7 @@ mod tests {
 
             // Unbounded: identical request; the profile's pinned tx-gas override
             // replaces the request's 3M and the burner completes.
-            let (updates, skipped, _) = extract_state_updates_hybrid(
+            let extracted = extract_state_updates_hybrid(
                 &provider,
                 call_request(consumer),
                 BlockId::latest(),
@@ -2284,6 +2691,7 @@ mod tests {
             )
             .await
             .expect("unbounded extraction must succeed on a >30M-gas call");
+            let (updates, skipped) = (extracted.state_updates, extracted.skipped_opcodes);
             assert!(skipped.is_empty(), "no opcodes should be skipped");
             assert_updates_eq(
                 &updates,
@@ -2310,7 +2718,7 @@ mod tests {
             let consumer = address!("0x0000000000000000000000000000000000002002");
             set_code(&provider, consumer, gigagas_two_slot_code()).await;
 
-            let (updates, ..) = extract_state_updates_hybrid(
+            let updates = extract_state_updates_hybrid(
                 &provider,
                 call_request(consumer),
                 BlockId::latest(),
@@ -2319,7 +2727,8 @@ mod tests {
                 SimProfile::Unbounded,
             )
             .await
-            .expect("extraction succeeds");
+            .expect("extraction succeeds")
+            .state_updates;
 
             let cost = validate_unbounded_cost(
                 &updates,
@@ -2347,7 +2756,7 @@ mod tests {
             let consumer = address!("0x0000000000000000000000000000000000002004");
             set_code(&provider, consumer, thousand_slot_writer_code()).await;
 
-            let (updates, ..) = extract_state_updates_hybrid(
+            let updates = extract_state_updates_hybrid(
                 &provider,
                 call_request(consumer),
                 BlockId::latest(),
@@ -2356,7 +2765,8 @@ mod tests {
                 SimProfile::Unbounded,
             )
             .await
-            .expect("extraction itself succeeds; only the budget gate rejects");
+            .expect("extraction itself succeeds; only the budget gate rejects")
+            .state_updates;
             assert_eq!(updates.len(), 1_000, "one Store per slot written");
 
             let violation = validate_unbounded_cost(
