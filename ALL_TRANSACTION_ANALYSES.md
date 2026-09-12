@@ -122,6 +122,24 @@ per-function work, not re-measured. A quiet window understates the average, and 
 are exactly when the product is worth most. Fees are paid by the *users* who send the
 transactions, not by the protocols — which affects who the counterparty in any deal is.
 
+> ### Verified against the sp1-cc gas-cap fix — 2026-09-12
+>
+> `origin/main` moved 7 commits ahead while this survey ran, including `a508caf`, which pins
+> `sp1-cc` to the revision carrying a **transaction gas cap fix**. Before it, every `EvmSketch`
+> and guest execution ran capped at **16,777,216 gas** regardless of the block header. The branch
+> was merged and the binary rebuilt.
+>
+> **No result changed.** Five references spanning the range were re-measured on the new build and
+> reproduced gas, base estimate and savings exactly: Rocket Pool `deposit` 160,886/89,118 (13.53%),
+> Rocket Pool's largest deposit 227,313/141,720 (15.66%), Securitize BUIDL 1,139,537/1,135,760,
+> the UMA asserter 341,649/306,233, and Maple's 1,684-gas near miss 106,124/57,808.
+>
+> This is consistent with the upstream note in `docs/UNBOUNDED_MODE.md`: gas-analyzer uses
+> `EvmSketch` only for its anchor header and provider. Extraction runs through `debug_traceCall`
+> on the node and estimation through `gas-analyzer-estimator`'s own revm, so the capped path was
+> never in the measurement route.
+
+
 ## Scoreboard
 
 Best and typical figures use only properly measured runs. They exclude the two Ondo rows that turned out to be other people's traffic (a 13.37% MEV bot and a 1.64% aggregator that merely touched Ondo), and the two Morpho rows still tagged `heur`.
